@@ -71,3 +71,10 @@
 do-dag의 모델_프리셋 기본값은 mixed. 검증런_모델_프리셋 기본값은 do-dag의 모델_프리셋과 같게.
 verify-rounds의 모델_프리셋 기본값은 mixed.
 
+## Graphify
+
+`$graphify` 요청과 저장소 구조 질문에는 `.agents/skills/graphify/SKILL.md`를 사용한다.
+루트 `.graphifyignore`는 Graphify 입력을 `cataclysm-dda/`에 한정한다.
+`graphify-out/graph.json`이 있으면 원본 파일 검색 전에 `graphify query`를 실행한다.
+Graphify가 Agent 도구를 요구하면 Codex의 서브에이전트 도구를 사용한다.
+각 서브에이전트는 충분한 최저 모델을 사용하고 지정된 조각 파일을 직접 쓴다.

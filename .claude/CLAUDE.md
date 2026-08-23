@@ -96,3 +96,10 @@
 
 do-dag의 모델_프리셋 기본값은 mixed. 검증런_모델_프리셋 기본값은 do-dag의 모델_프리셋과 같게.
 verify-rounds의 모델_프리셋 기본값은 mixed.
+
+## Graphify
+
+`/graphify` 요청과 저장소 구조 질문에는 `.claude/skills/graphify/SKILL.md`를 사용한다.
+루트 `.graphifyignore`는 Graphify 입력을 `cataclysm-dda/`에 한정한다.
+`graphify-out/graph.json`이 있으면 원본 파일 검색 전에 `graphify query`를 실행한다.
+의미 추출 서브에이전트에는 `.claude/agents/gp-matrix/`에서 충분한 최저 모델을 선택한다.

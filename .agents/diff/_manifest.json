@@ -1,5 +1,7 @@
 {
   "overlays": {
+    "graphify/SKILL.md": "d7c1da76a0b0dc406a7e2e45bb32bfe8cd4a661b",
+    "graphify/references/hooks.md": "8b5d7896105b2be0c066d501a4ebc920a3632eff",
     "task-intake/SKILL.md": "39164deb162fd0bead410a62f0b8ee9506a82ba7"
   }
 }
