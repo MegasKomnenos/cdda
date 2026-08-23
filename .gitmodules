@@ -1,0 +1,3 @@
+[submodule "cataclysm-dda"]
+	path = cataclysm-dda
+	url = https://github.com/cleverraven/cataclysm-dda.git
