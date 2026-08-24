@@ -182,9 +182,9 @@ CPU 사이클은 CPU가 명령을 처리하며 진행한 횟수를 세는 단위
 | sounds.ai | 이전 소리 사건을 생물 인공지능 입력으로 바꾼다 |
 | map.creature_fields | 플레이어에게 현재 타일의 필드 효과를 적용한다 |
 
-프로파일에는 두 특수 측정 요소가 있다. `unattributed`는 이름 붙은 코드 구간 밖에서 사용한 CPU 사이클이다.
+프로파일에는 두 특수 측정 요소가 있다. `unattributed`는 프로파일러가 이름 붙인 코드 구간에 배정하지 않은 CPU 사이클이다.
 
-`background.other`는 주 스레드가 아닌 기존 백그라운드 작업의 CPU 사이클이다. 두 특수 측정 요소는 병렬 전환 대상에서 제외한다.
+`background.other`는 프로세스 CPU 사이클에서 주 스레드 CPU 사이클을 뺀 값이다. 이 값은 주 스레드 밖 CPU 사용량만 나타내므로 어떤 작업이 썼는지는 밝히지 않는다. 두 특수 측정 요소는 병렬 전환 대상에서 제외한다.
 
 아래 표는 JSON 원자료에서 평균 지분을 다시 계산한 결과다.
 
@@ -206,7 +206,7 @@ CPU 사이클은 CPU가 명령을 처리하며 진행한 횟수를 세는 단위
 | 14 | map.fields | 0.7138% |
 | 15 | map.vehicles | 0.5408% |
 
-`unattributed`는 출처를 모르는 값이다. `background.other`는 이미 주 스레드와 겹칠 수 있다.
+`unattributed`는 전체 CPU 사이클에서 모든 측정 요소의 독점 CPU 사이클을 뺀 음수가 아닌 나머지다. `background.other`는 주 스레드와 동시에 실행할 수 있지만, 프로파일러는 그 CPU 사이클을 특정 작업에 연결하지 않는다.
 
 `scent`의 전체 평균 지분은 2.5798%다. 첫 1,000턴의 평균 지분은 23.2357%다.
 
@@ -593,7 +593,7 @@ player_visibility_output
 
 ### 10.3 음향 계산 그룹
 
-현재 `src/sounds.cpp`의 `sounds.effects` 구간은 청력 손실 종료, 위험 음악, 차량 음향, 낮은 체력 음향을 계산한다. 같은 함수들은 오디오 라이브러리도 호출한다.
+현재 `src/do_turn.cpp`의 `sounds.effects` 구간은 `src/sounds.cpp`의 청력 손실 종료, 위험 음악, 차량 음향, 낮은 스태미나 음향 함수를 호출한다. 이 함수들은 오디오 라이브러리도 호출한다.
 
 새 음향 평가 작업은 게임 상태를 읽고 `audio_command` 변경 레코드만 만든다. 음향 평가 작업은 오디오 라이브러리를 호출하지 않는다. 듣기, 효과, 메시지, 활동 취소, 생물 기억처럼 게임 상태를 바꾸는 음향 결과는 `audio_command`와 분리한 변경 레코드로 주 스레드 병합기에 보낸다.
 
@@ -884,7 +884,9 @@ git -C cataclysm-dda rev-parse HEAD
 
 성능 비교는 새 코드의 직렬 실행 모드와 병렬 실행 모드 사이에서 수행한다. 과거 프로파일 파일 하나만으로 속도 향상을 판정하지 않는다.
 
-각 실행 모드는 같은 난수 초기값으로 10,000턴을 세 번 실행한다. 세 실행의 중앙값을 사용한다.
+각 실행 모드는 같은 난수 초기값으로 10,000턴을 세 번 실행한다. 실행 하나의 `elapsed_microseconds` 10,000개를 오름차순으로 정렬한다. 턴 중앙값은 0-based 인덱스 5,000의 값이다. 턴 99백분위 값은 0-based 인덱스 9,900의 값이다. 턴 평균 경과 시간은 10,000개 값의 산술 평균이다.
+
+각 실행 모드에서 세 실행을 턴 평균 경과 시간 오름차순으로 정렬한다. 둘째 실행을 중앙 실행으로 정한다. 성능 게이트와 성능 보고서의 모든 수치는 각 모드의 중앙 실행에서 읽는다. 성능 보고서는 두 중앙 실행의 경로와 각 모드의 세 턴 평균 경과 시간, 세 턴 99백분위 값을 함께 적는다.
 
 `경과 시간`은 턴 시작부터 턴 종료까지 벽시계로 잰 실제 시간이다. 프로파일 JSON은 경과 시간을 `elapsed_microseconds`로 기록한다.
 
@@ -902,7 +904,7 @@ git -C cataclysm-dda rev-parse HEAD
 턴당 같은 대상 충돌 수
 ```
 
-병렬 실행 모드의 턴 평균 경과 시간이 직렬 실행 모드보다 작아야 한다. 병렬 실행 모드의 99백분위 경과 시간도 작아야 한다.
+병렬 실행 모드의 중앙 실행에서 턴 평균 경과 시간이 직렬 실행 모드의 중앙 실행보다 작아야 한다. 병렬 실행 모드의 중앙 실행에서 턴 99백분위 경과 시간도 직렬 실행 모드의 중앙 실행보다 작아야 한다.
 
 두 조건 중 하나가 실패하면 작업 크기와 병합 비용을 다시 측정한다. 두 조건을 통과하기 전에는 병렬 실행 모드를 기본값으로 설정하지 않는다.
 
@@ -914,32 +916,25 @@ git -C cataclysm-dda rev-parse HEAD
 & 'C:\cdda\test-game.ps1'
 ```
 
-기준 프로파일과 최종 프로파일을 실행하기 전에 아래 명령을 작업 루트에서 한 번 실행한다. 명령이 출력 디렉터리 하나라도 찾으면 프로파일을 시작하지 않는다.
+각 프로파일 명령을 실행하기 직전에 아래 명령을 작업 루트에서 실행한다. `$profileOutputDirectory`에는 그 프로파일 명령의 `-OutputDirectory` 값을 넣는다. 출력 디렉터리가 있으면 프로파일을 시작하지 않는다.
 
 ```powershell
-$profileRoot = 'C:\cdda\cataclysm-dda\turn-profile-results'
-$profileDirectories = @(
-    (Join-Path $profileRoot 'turn-parallel-baseline')
-) + @(1..3 | ForEach-Object {
-    Join-Path $profileRoot "turn-parallel-final-serial-$_"
-}) + @(1..3 | ForEach-Object {
-    Join-Path $profileRoot "turn-parallel-final-parallel-$_"
-})
-$occupiedDirectories = @($profileDirectories | Where-Object {
-    Test-Path -LiteralPath $_
-})
-if( $occupiedDirectories.Count -ne 0 ) {
-    throw "프로파일 출력 디렉터리가 이미 있습니다:`n$($occupiedDirectories -join "`n")"
+if( Test-Path -LiteralPath $profileOutputDirectory ) {
+    throw "프로파일 출력 디렉터리가 이미 있습니다: $profileOutputDirectory"
 }
 ```
 
 기준 프로파일은 작업 루트에서 아래 명령으로 실행한다.
 
 ```powershell
+$profileOutputDirectory = 'C:\cdda\cataclysm-dda\turn-profile-results\turn-parallel-baseline'
+if( Test-Path -LiteralPath $profileOutputDirectory ) {
+    throw "프로파일 출력 디렉터리가 이미 있습니다: $profileOutputDirectory"
+}
 pwsh -File 'C:\cdda\cataclysm-dda\tools\profile-turns.ps1' `
     -Turns 10000 `
     -Seed 'cdda-turn-profile-v1' `
-    -OutputDirectory 'C:\cdda\cataclysm-dda\turn-profile-results\turn-parallel-baseline' `
+    -OutputDirectory $profileOutputDirectory `
     -NoOpen
 ```
 
@@ -949,24 +944,32 @@ pwsh -File 'C:\cdda\cataclysm-dda\tools\profile-turns.ps1' `
 
 ```powershell
 1..3 | ForEach-Object {
+    $profileOutputDirectory = "C:\cdda\cataclysm-dda\turn-profile-results\turn-parallel-final-serial-$_"
+    if( Test-Path -LiteralPath $profileOutputDirectory ) {
+        throw "프로파일 출력 디렉터리가 이미 있습니다: $profileOutputDirectory"
+    }
     pwsh -File 'C:\cdda\cataclysm-dda\tools\profile-turns.ps1' `
         -Turns 10000 `
         -Seed 'cdda-turn-profile-v1' `
         -TurnWorkers 1 `
-        -OutputDirectory "C:\cdda\cataclysm-dda\turn-profile-results\turn-parallel-final-serial-$_" `
+        -OutputDirectory $profileOutputDirectory `
         -NoOpen
 }
 ```
 
-최종 병렬 프로파일은 아래 명령으로 세 번 실행한다.
+최종 병렬 프로파일은 아래 명령으로 세 번 실행한다. 이 명령은 주 스레드와 작업자 스레드 하나를 평가에 사용한다.
 
 ```powershell
 1..3 | ForEach-Object {
+    $profileOutputDirectory = "C:\cdda\cataclysm-dda\turn-profile-results\turn-parallel-final-parallel-$_"
+    if( Test-Path -LiteralPath $profileOutputDirectory ) {
+        throw "프로파일 출력 디렉터리가 이미 있습니다: $profileOutputDirectory"
+    }
     pwsh -File 'C:\cdda\cataclysm-dda\tools\profile-turns.ps1' `
         -Turns 10000 `
         -Seed 'cdda-turn-profile-v1' `
-        -TurnWorkers 0 `
-        -OutputDirectory "C:\cdda\cataclysm-dda\turn-profile-results\turn-parallel-final-parallel-$_" `
+        -TurnWorkers 2 `
+        -OutputDirectory $profileOutputDirectory `
         -NoOpen
 }
 ```
