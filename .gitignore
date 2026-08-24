@@ -17,6 +17,9 @@ __pycache__/
 # Graphify가 만드는 로컬 지식 그래프와 캐시.
 graphify-out/
 
+# CDDA 컴파일 산출물, 배포본, 로컬 저장 파일.
+/build/
+
 # wayfinder가 `gh issue create --body-file`에 넘기려고 만드는 임시 본문 파일.
 # 지도와 티켓의 정본은 이슈 트래커이므로 그 사본을 추적하지 않는다.
 .wayfinder-tmp/
