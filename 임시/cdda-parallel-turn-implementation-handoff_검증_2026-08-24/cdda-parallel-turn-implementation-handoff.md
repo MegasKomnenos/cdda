@@ -1038,4 +1038,4 @@ pwsh -File 'C:\cdda\cataclysm-dda\tools\profile-turns.ps1' `
 사용자에게 필요한 결정: 하나의 닫힌 결정
 보존한 기존 변경: 경로 전건
 검사하지 않은 범위: 경로 또는 절 전건
-```
+````
