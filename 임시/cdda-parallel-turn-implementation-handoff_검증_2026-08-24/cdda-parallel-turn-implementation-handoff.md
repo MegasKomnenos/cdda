@@ -26,27 +26,33 @@ Cataclysm-DDA는 격자 지도를 사용하는 싱글 플레이어 생존 게임
 
 `필드 방출`은 지형이나 가구가 새 필드를 만드는 규칙이다. `비플레이어 캐릭터`는 사람이 조작하지 않고 게임 인공지능이 행동시키는 인간형 생물이다.
 
-게임은 `src/do_turn.cpp`의 `game::do_turn()`으로 한 게임 턴을 처리한다. `game::do_turn()`은 플레이어 입력과 자동 세계 갱신으로 구성된다.
+게임은 `src/do_turn.cpp`의 `game::do_turn()`으로 한 게임 턴을 처리한다. `game::do_turn()`은 플레이어 입력과 자동 처리를 섞어 실행한다.
 
-플레이어 입력은 플레이어가 이동, 공격, 활동을 선택하는 구간이다. 자동 세계 갱신은 플레이어 입력 뒤에 게임 규칙이 세계를 바꾸는 구간이다.
+플레이어 입력은 플레이어가 이동, 공격, 활동을 선택하는 `player.input` 구간이다. 자동 처리는 `player.input` 앞과 뒤에서 게임 상태를 바꾼다.
 
-현재 `game::do_turn()`은 자동 세계 갱신을 정해진 순서로 실행한다. 주요 순서는 다음과 같다.
+첫 완료 범위의 측정 요소는 현재 다음 순서로 실행한다. 이 목록은 현재 순서를 설명한다. 8절의 새 턴 순서는 이 목록과 구별한다.
 
 ```text
-냄새 확산
-바닥과 낙하 처리
-차량 이동
-필드 처리
-활성 아이템 처리
-폭발 처리
-생물의 필드 효과 처리
-소리 처리
-가시성 캐시 계산
-몬스터와 비플레이어 캐릭터 행동
-지형과 가구의 필드 방출
-플레이어 상태 갱신
-날씨와 음향 효과 처리
+player.body
+sounds.markers
+player.input
+scent
+map.floor
+map.vehicles
+map.fields
+map.items
+map.explosions
+map.creature_fields
+sounds.ai
+map.visibility
+creatures
+map.emissions
+player.replenish
+player.temperature
+sounds.effects
 ```
+
+`game::do_turn()`은 이 목록 밖의 자동 처리도 호출한다. 6절의 병렬 전환 대상과 7절의 직렬 유지 대상이 첫 완료 범위를 정한다.
 
 현재 함수들은 하나의 가변 게임 상태를 즉시 바꾼다. 뒤에서 실행하는 함수는 앞 함수가 같은 턴에 만든 변경을 볼 수 있다.
 
@@ -204,7 +210,7 @@ CPU 사이클은 CPU가 명령을 처리하며 진행한 횟수를 세는 단위
 
 `scent`의 전체 평균 지분은 2.5798%다. 첫 1,000턴의 평균 지분은 23.2357%다.
 
-기준 실행은 플레이어를 움직이지 않는다. `src/scent_map.cpp`의 `scent_map::update()`는 플레이어가 1,000턴 동안 움직이지 않으면 계산을 중단한다.
+기준 실행은 플레이어를 움직이지 않는다. `src/scent_map.cpp`의 `scent_map::update()`는 마지막 이동 뒤 1,000턴째까지 계산한다. `scent_map::update()`는 마지막 이동 뒤 1,001턴째에 처음 계산을 중단한다.
 
 따라서 움직이는 실제 플레이에서 `scent`는 전체 평균보다 큰 비용을 만들 수 있다. 이 이유로 `scent`를 병렬 전환 대상에 포함한다.
 
@@ -292,8 +298,8 @@ CPU 사이클은 CPU가 명령을 처리하며 진행한 횟수를 세는 단위
 3. 게임이 턴 입력 상태 S_t를 고정한다.
 4. 턴 작업 실행기가 13개 측정 요소의 평가 작업을 실행한다.
 5. 병합기가 외부 변경을 대상별 순서대로 적용한다.
-6. 게임이 다음 게임 상태 S_t+1을 공개한다.
-7. 기존 직렬 코드가 화면, 사기, 종료 처리를 실행한다.
+6. 기존 직렬 코드가 화면, 사기, 종료 처리를 실행한다.
+7. 게임이 모든 직렬 처리 결과를 포함한 다음 게임 상태 S_t+1을 공개한다.
 ```
 
 1단계는 `game::do_turn()`의 시작부터 `player.input` 구간의 끝까지다. `player.body`는 1단계에서 제거하고 4단계로 옮긴다.
@@ -304,7 +310,7 @@ CPU 사이클은 CPU가 명령을 처리하며 진행한 횟수를 세는 단위
 
 새 폭발은 다음 자동 세계 갱신의 2단계에서 실행한다. 따라서 병렬 평가 중 만든 폭발은 현재 엔진보다 한 자동 세계 갱신 늦게 실행될 수 있다.
 
-7단계는 `overmap.npcs`, `render`, `weather.effects`, `ui.progress`, `map.visibility_invalidate`, `player.morale`, `player.finalize`, `debug.capture`를 포함한다.
+6단계는 `overmap.npcs`, `render`, `weather.effects`, `ui.progress`, `map.visibility_invalidate`, `player.morale`, `player.finalize`, `debug.capture`를 포함한다.
 
 ## 9. 공통 자료 구조와 실행 계약
 
@@ -329,11 +335,15 @@ field_cache와 submaps_with_active_items
 평가 작업이 읽는 게임 옵션 값
 ```
 
-전체 게임 상태를 턴마다 깊은 복사하지 않는다. 바뀌지 않는 데이터는 공유 읽기 전용 저장소를 참조한다.
+전체 게임 상태를 턴마다 깊은 복사하지 않는다. 그러나 공유 읽기 전용 저장소는 평가 파동이 끝날 때까지 바뀌지 않고 `const` 보기만 제공할 때만 참조한다. 이 조건을 입증하지 못한 가변 자료는 값 또는 불변 사본으로 `turn_input_state`에 넣는다.
 
 바뀌는 조밀 배열은 현재 버퍼와 다음 버퍼 두 개를 사용한다. 자동 세계 갱신이 끝나면 두 버퍼의 역할을 교환한다.
 
-희소 객체는 안정적인 객체 식별자로 참조한다. 안정적인 객체 식별자는 메모리 주소를 사용하지 않는다.
+희소 객체는 이번 파동에만 유효한 안정적인 객체 식별자로 참조한다. 안정적인 객체 식별자는 메모리 주소를 사용하지 않는다.
+
+평가 작업은 `get_map()`, `get_avatar()`, `get_scent()`, `get_weather()`, 전역 `g`, `overmap_buffer`를 호출하지 않는다. 이 접근을 하거나 그 접근으로 이어지는 기존 함수를 작업자에서 호출하지 않는다. 구현자는 기존 함수에서 계산을 입력 구조체와 난수 스트림을 받는 평가 함수로 추출한다.
+
+13개 측정 요소마다 병렬 모드를 켜기 전에 입력 목록, 모든 쓰기, 도달 가능한 전역 접근, 난수 호출, 결과의 적용 대상을 표로 기록한다. 목록에 남은 전역 접근이나 쓰기가 있으면 그 측정 요소는 기존 직렬 경로에 둔다. 13개 표가 모두 닫히기 전에는 18절의 완료 조건을 주장하지 않는다.
 
 ### 9.2 평가 작업
 
@@ -417,7 +427,7 @@ struct turn_change_order {
 };
 ```
 
-`system`의 순서는 현재 `game::do_turn()`의 순서를 따른다.
+`system`의 순서는 8절이 정한 새 실행 순서를 따른다.
 
 ```text
 player.body
@@ -447,9 +457,11 @@ sounds.effects
 
 `local_order`는 평가 작업 하나가 변경 레코드를 만든 순서다. 각 평가 작업은 0부터 시작한다.
 
-병합기는 대상 종류와 대상 식별자로 변경 레코드를 분할한다. 병합기는 대상 하나 안에서만 순서 키를 정렬한다.
+병합기는 변경 레코드마다 모든 쓰기 대상을 기록한다. 생물 이동처럼 생물 상태, 점유 배열, 생물 위치 색인을 함께 바꾸는 변경은 하나의 원자 변경으로 기록한다.
 
-병합기는 모든 변경 레코드를 한 전역 배열에서 정렬하지 않는다. 서로 다른 대상의 변경은 서로 다른 작업자가 병합할 수 있다.
+병합기는 `turn_change_order`의 전체 순서로 원자 변경을 적용한다. 구현자는 작업자별로 이미 `turn_change_order` 순서를 지킨 배열을 만들고, 주 스레드에서 k-way 병합해 전역 배열의 추가 정렬 비용을 피한다.
+
+병합기는 두 변경의 쓰기 대상이 서로소이고, 적용이 다른 가변 상태를 읽지 않으며, 적용 중 새 변경을 만들지 않는다는 단위 테스트가 있을 때만 두 변경을 병렬 적용한다. 그 밖의 변경은 주 스레드가 순서대로 적용한다.
 
 같은 대상의 변경 레코드는 아래 규칙으로 적용한다.
 
@@ -476,18 +488,38 @@ sounds.effects
 
 평가 작업은 `src/rng.cpp`의 전역 난수 엔진을 호출하지 않는다. 평가 작업은 새 `turn_random_stream`을 사용한다.
 
-`turn_random_stream`은 아래 네 값을 입력으로 받는다.
+`turn_input_state`는 자동 세계 갱신을 시작할 때 난수 초기값을 값으로 고정한다. `turn_random_stream`은 아래 다섯 값을 입력으로 받는다.
 
 ```text
+난수 초기값
 게임 턴 번호
 turn_system 값
 turn_owner 식별자
 평가 작업 안의 난수 호출 번호
 ```
 
-`turn_random_stream`은 명시한 정수 해시 알고리즘을 사용한다. `std::hash`는 사용하지 않는다.
+난수 초기값 문자열은 UTF-8 바이트를 FNV-1a 64비트로 해시한다. 해시의 시작값은 `14695981039346656037ULL`이다. 각 바이트에는 `hash ^= byte; hash *= 1099511628211ULL;`를 차례로 적용한다.
 
-테스트는 작업자 수 1, 2, 4에서 같은 난수 결과를 요구한다. 테스트는 평가 작업 제출 순서를 바꿔도 같은 난수 결과를 요구한다.
+게임 턴 번호, `turn_system` 값, `turn_owner` 식별자, 평가 작업 안의 난수 호출 번호는 부호 없는 64비트 정수로 기록한다. `turn_owner` 식별자는 `turn_input_state`를 만들 때 배정한 안정적인 값이다.
+
+`turn_random_stream`은 FNV-1a 결과부터 게임 턴 번호, `turn_system` 값, `turn_owner` 식별자, 난수 호출 번호 순서로 아래 `mix` 함수를 한 번씩 적용한다. 각 단계에서 `state = mix( state ^ value )`를 계산한다.
+
+```cpp
+std::uint64_t mix( std::uint64_t state ) {
+    state += 0x9E3779B97F4A7C15ULL;
+    state = ( state ^ ( state >> 30 ) ) * 0xBF58476D1CE4E5B9ULL;
+    state = ( state ^ ( state >> 27 ) ) * 0x94D049BB133111EBULL;
+    return state ^ ( state >> 31 );
+}
+```
+
+`turn_random_stream`은 마지막 `mix` 결과를 난수 단어로 반환한다. `turn_random_stream`은 `std::hash`와 `src/rng.cpp`의 전역 난수 엔진을 사용하지 않는다.
+
+평가 함수와 평가 함수가 호출하는 모든 도우미는 난수 스트림을 인자로 받는다. 작업자 경로에서는 `rng()`, `rng_float()`, `one_in()`, `x_in_y()`, `random_entry()`와 전역 엔진을 읽는 다른 함수를 호출하지 않는다. 기존 호출이 이 함수들을 쓰면 같은 범위와 분포를 받는 `turn_random_stream` 도우미로 바꾼다.
+
+구현자는 측정 요소마다 난수 호출 경로를 목록으로 만들고, 각 호출 자리에 난수 호출 번호가 증가하는 한 곳을 둔다. 전역 난수 호출이나 번호 없는 새 호출이 남으면 그 측정 요소는 직렬 경로에 둔다.
+
+테스트는 같은 난수 초기값과 다섯 입력에서 같은 난수 단어를 요구한다. 테스트는 난수 초기값 하나와 다른 난수 초기값 하나를 같은 나머지 네 입력에 넣고, 두 난수 흐름이 다른 결과를 내는지 확인한다. 테스트는 작업자 수 1, 2, 4에서 같은 난수 결과를 요구한다. 테스트는 평가 작업 제출 순서를 바꿔도 같은 난수 결과를 요구한다. 테스트는 필드 확산, 활성 아이템, 소리 군집, 생물 계획처럼 난수를 쓰는 각 평가 경로를 적어도 하나씩 실행한다.
 
 ## 10. 계산 그룹별 구현
 
@@ -527,7 +559,7 @@ turn_owner 식별자
 
 ### 10.2 플레이어 상태 계산 그룹
 
-플레이어 상태 계산은 같은 플레이어를 대상으로 하는 평가 작업 네 개다.
+플레이어 상태 계산은 같은 플레이어를 대상으로 하는 평가 작업 다섯 개다.
 
 | 평가 작업 | 현재 함수 | 소유 결과 |
 |---|---|---|
@@ -537,9 +569,11 @@ turn_owner 식별자
 | player_field_job | `map::creature_in_field()`의 플레이어 호출 | 플레이어 필드 피해와 효과 |
 | player_visibility_job | `game::mon_info_update()` | 적대 생물 표시, 안전 모드, 활동 중단 결과 |
 
-다섯 평가 작업은 같은 플레이어 시작 상태를 읽는다. 다섯 평가 작업은 가변 플레이어 객체를 공유하지 않는다.
+다섯 평가 작업은 같은 플레이어 시작 상태를 읽는다. 다섯 평가 작업은 가변 플레이어 객체를 공유하지 않는다. 표의 현재 함수는 동작의 출처다. 평가 작업은 현재 함수를 작업자 스레드에서 직접 호출하지 않는다.
 
-다섯 평가 작업은 각각 고정 형식 결과 구조체를 만든다. 구조체 이름은 아래 목록으로 닫는다.
+구현자는 다섯 평가 작업을 켜기 전에 플레이어 가변 필드와 외부 쓰기의 소유 표를 만든다. 소유 표의 행은 필드 또는 외부 대상, 유일한 평가 작업 또는 병합기, 적용 순서, 현재 함수다. 효과, 사기, 인벤토리, 지도 아이템, 사용자 메시지처럼 둘 이상이 바꿀 수 있는 값은 전용 결과에 직접 쓰지 않는다. 구현자는 그 값을 변경 레코드와 병합 규칙으로 표현한다.
+
+다섯 평가 작업은 각각 고정 형식 결과 구조체를 만든다. 구조체 이름은 아래 목록으로 닫는다. 구조체의 직접 작성 범위는 소유 표에서 다른 구조체와 겹치지 않아야 한다.
 
 ```text
 player_body_output
@@ -555,37 +589,37 @@ player_visibility_output
 
 `player_visibility_job`의 기준 CPU 사이클은 `map.emissions` 측정 요소에 포함되어 있다. 6.2절의 27.7311%에는 이 CPU 사이클이 들어 있지 않다.
 
-플레이어 병합기는 다섯 결과 구조체를 `turn_system` 순서로 적용한다. 플레이어 병합기는 작업자 실행 순서를 사용하지 않는다.
+플레이어 병합기는 다섯 결과 구조체와 변경 레코드를 `turn_system` 순서로 적용한다. 플레이어 병합기는 작업자 실행 순서를 사용하지 않는다. 소유 표에서 중복 작성자가 나오면 해당 작업을 병렬 모드에 넣지 않는다.
 
 ### 10.3 음향 계산 그룹
 
 현재 `src/sounds.cpp`의 `sounds.effects` 구간은 청력 손실 종료, 위험 음악, 차량 음향, 낮은 체력 음향을 계산한다. 같은 함수들은 오디오 라이브러리도 호출한다.
 
-새 음향 평가 작업은 게임 상태를 읽고 `audio_command` 변경 레코드만 만든다. 음향 평가 작업은 오디오 라이브러리를 호출하지 않는다.
+새 음향 평가 작업은 게임 상태를 읽고 `audio_command` 변경 레코드만 만든다. 음향 평가 작업은 오디오 라이브러리를 호출하지 않는다. 듣기, 효과, 메시지, 활동 취소, 생물 기억처럼 게임 상태를 바꾸는 음향 결과는 `audio_command`와 분리한 변경 레코드로 주 스레드 병합기에 보낸다.
 
 플레이어가 귀가 들리지 않으면 `sounds.markers`의 듣기 평가 작업이 청력 손실 시작 명령을 만든다. 이 명령도 `audio_command` 변경 레코드다.
 
-오디오 소유 스레드 하나가 `audio_command`를 순서대로 실행한다. 다른 작업자 스레드는 오디오 라이브러리를 호출하지 않는다.
+오디오 소유 스레드 하나가 `audio_command`를 순서대로 실행한다. `audio_command`는 게임 객체, 포인터, 전역 난수 스트림을 담지 않는다. 구현자는 `sounds.cpp`와 오디오 백엔드의 모든 오디오 호출을 목록으로 만들고, 기존의 분리·detach 스레드를 없애거나 오디오 소유 스레드의 대기열로 바꾼다. 다른 작업자 스레드는 오디오 라이브러리를 호출하지 않는다.
 
-오디오 소유 스레드는 다음 게임 상태 공개를 막지 않는다. 게임 종료는 오디오 명령 처리를 중단하고 오디오 소유 스레드를 합류시킨다.
+오디오 소유 스레드는 다음 게임 상태 공개를 막지 않는다. 게임 종료는 새 명령 수락을 먼저 멈추고, 대기열을 버리거나 처리할 정책을 정한 뒤, 게임 상태가 파괴되기 전에 오디오 소유 스레드를 합류시킨다. 종료 시험은 합류 뒤 남은 오디오 스레드가 없고 오디오 소유 스레드가 게임 상태를 읽지 않았음을 확인한다.
 
 ### 10.4 지도 계산 그룹
 
 `scent`와 `map.visibility`는 많은 인접 셀을 같은 규칙으로 계산한다. 두 계산은 조밀 배열 평가 작업으로 구현한다.
 
-`scent`는 목적지 셀이 시작 냄새 배열의 이웃 값을 읽게 한다. 목적지 셀은 다음 냄새 배열의 자기 위치만 쓴다.
+`scent`는 목적지 셀이 시작 냄새 배열의 이웃 값을 읽게 한다. 목적지 셀은 다음 냄새 배열의 자기 위치만 쓴다. 입력과 출력에는 냄새 배열, 냄새 종류, 플레이어 마지막 위치, 플레이어 마지막 이동 턴을 함께 넣는다. 주 스레드는 냄새 작업이 끝난 뒤 네 값을 한 묶음으로 공개한다.
 
 `가시성 패스`는 `map::build_map_cache()`가 가시성 자료 전체를 한 번 순회하는 계산 단계다. 현재 함수에는 서로의 결과를 요구하는 가시성 패스가 여러 개 있다.
 
-`map.visibility`는 현재 가시성 패스 순서를 유지한다. 같은 가시성 패스 안의 z층이나 행 구역만 병렬로 계산한다.
+`map.visibility`는 현재 가시성 패스 순서를 유지한다. 구현자는 각 패스의 입력 배열, 출력 배열, 인접 z층 쓰기, 플레이어 캐시 쓰기를 목록으로 만든다. 같은 패스의 작업은 자기 출력 구역만 쓰고, 주 스레드는 패스 장벽 뒤에 출력 배열을 다음 패스 입력으로 공개한다. 기존 `map::build_map_cache()`를 작업자에서 직접 호출하지 않는다.
 
 서브맵은 12×12 타일 묶음이다. `field_cache`는 필드가 있는 서브맵을 표시한다.
 
 `submaps_with_active_items`는 활성 아이템이 있는 서브맵의 좌표를 저장한다. 두 현재 목록은 희소 계산의 작업 위치를 제한한다.
 
-`map.fields`는 `field_cache`가 표시한 서브맵마다 평가 작업 하나를 만든다. `map.items`는 `submaps_with_active_items`의 서브맵마다 평가 작업 하나를 만든다.
+`map.fields`는 `field_cache`가 표시한 서브맵마다 평가 작업 하나를 만든다. 필드 작업은 자기 서브맵과 한 타일 경계의 시작 상태를 읽고, 자기 서브맵 출력과 경계 밖 변경 레코드를 만든다. 작업자는 `process_fields_in_submap()`을 직접 호출하지 않는다. 병합기는 경계 밖 변경을 순서 키대로 적용한다.
 
-`map.items`는 차량 아이템도 처리한다. 차량 아이템은 차량이 들어 있는 서브맵마다 별도 평가 작업 하나를 만든다.
+`map.items`는 `submaps_with_active_items`의 서브맵마다 평가 작업 하나를 만든다. `map.items`는 차량 아이템도 처리한다. 차량 아이템은 차량이 들어 있는 서브맵마다 별도 평가 작업 하나를 만든다. 두 작업은 활성 목록과 아이템 컨테이너를 시작 상태에서 읽고, 소유 출력 또는 변경 레코드만 만든다.
 
 `map.emissions`의 필드 방출 부분은 가구 방출 위치 목록과 지형 방출 위치 목록을 입력으로 사용한다. 실행기는 각 목록을 작업자 수만큼 연속 구간으로 나눈다.
 
@@ -664,68 +698,38 @@ GPU 구현은 같은 `turn_input_state`와 다음 버퍼 형식을 사용한다.
 
 저장소는 C++17을 사용한다. `CMakeLists.txt`의 `CMAKE_CXX_STANDARD` 값은 17이다.
 
-## 14. 현재 작업 트리와 보존 조건
+## 14. 작업 시작 시 Git 상태와 보존 조건
 
 작업 루트는 `C:\cdda`다. 모든 명령은 작업 루트에서 실행한다.
 
-루트 저장소 브랜치는 `main`이다. 루트 저장소는 `origin/main`보다 커밋 하나 앞서 있다.
+이 인계문을 실행할 때 Git 상태는 달라질 수 있다. 브랜치, 커밋, 변경 목록을 고정값으로 가정하지 않는다.
 
-Cataclysm-DDA 소스는 `C:\cdda\cataclysm-dda` 서브모듈이다. 현재 서브모듈 커밋은 `f84af651df313f1d06667f3fefc781d0e979bb41`이다.
+병렬화 파일을 편집하기 전에 아래 명령을 실행한다.
 
-서브모듈 브랜치는 `master`다. 서브모듈은 `origin/master`를 추적한다.
-
-작업 트리는 이미 변경되어 있다. 기존 변경은 사용자의 작업이므로 삭제하거나 되돌리지 않는다.
-
-루트 저장소의 현재 변경은 아래와 같다.
-
-```text
-M  .gitignore
-m  cataclysm-dda
-?? build-game.ps1
-?? setup-build-tools.ps1
-?? test-game.ps1
+```powershell
+git status --short --branch
+git rev-parse HEAD
+git -C cataclysm-dda status --short --branch
+git -C cataclysm-dda rev-parse HEAD
 ```
 
-서브모듈의 현재 변경은 아래와 같다.
+명령의 출력은 구현 시작 시점의 루트와 서브모듈 상태다. 새 세션은 출력에 있는 변경을 기존 사용자 변경으로 취급한다.
 
-```text
-M  CMakeLists.txt
-M  src/CMakeLists.txt
-M  src/do_turn.cpp
-M  src/main.cpp
-M  src/main_menu.cpp
-M  src/newcharacter.cpp
-M  tests/CMakeLists.txt
-?? src/turn_profile_character.h
-?? src/turn_profiler.cpp
-?? src/turn_profiler.h
-?? tests/turn_profiler_test.cpp
-?? tools/profile-turns.ps1
-?? turn-profile-results/
-```
-
-기존 변경은 턴 프로파일러, 빌드 스크립트, 테스트 스크립트를 추가한다. 새 세션은 기존 변경을 병렬화 구현의 기준 장치로 사용한다.
-
-새 세션은 `git reset`, `git checkout`, `git stash`로 기존 변경을 제거하지 않는다.
+새 세션은 기존 사용자 변경을 삭제하거나 되돌리지 않는다. 새 세션은 `git reset`, `git checkout`, `git stash`를 실행하지 않는다.
 
 ## 15. 작업 시작 절차
 
-저장소에는 실제 `AGENTS.md` 파일이 없다. 사용자가 이전 세션에 작업 규칙을 제공했다.
+새 세션은 작업 환경이 제공한 작업 규칙을 먼저 따른다.
 
 `C:\cdda\기억` 디렉터리는 이전 작업에서 확정한 저장소 지식을 보관한다. Graphify는 소스 파일과 호출 관계를 저장한 코드 그래프 도구다.
 
-현재 Graphify 그래프 파일은 `C:\cdda\graphify-out\graph.json`이다.
-
 1. `C:\cdda\기억\색인.md`를 읽는다.
-2. `C:\cdda\기억\layer3\L-0001.md`를 읽는다.
-3. `C:\cdda\기억\layer3\L-0006.md`를 읽는다.
-4. `C:\cdda\기억\layer3\L-0015.md`를 읽는다.
-5. `C:\cdda\기억\layer1\M-0002.md`를 읽는다.
-6. `C:\cdda\graphify-out\graph.json`의 존재를 확인한다.
-7. 코드 관계를 찾기 전에 `graphify query`를 실행한다.
-8. `git status --short --branch`로 루트 변경을 확인한다.
-9. `git -C cataclysm-dda status --short --branch`로 서브모듈 변경을 확인한다.
-10. 기존 변경을 보존하는 작업 계획을 만든다.
+2. 색인의 layer-3 절에서 자동 세계 갱신 병렬화와 검증에 관련된 현행 노드를 읽는다.
+3. 색인의 반영 수위 이후 layer-1·layer-2 줄에서 관련 노드를 골라 읽는다.
+4. `C:\cdda\graphify-out\graph.json`의 존재를 확인한다.
+5. 그래프 파일이 있으면 코드 관계를 찾기 전에 `graphify query`를 실행한다.
+6. 14절의 Git 상태 명령을 실행한다.
+7. 실측한 기존 사용자 변경을 보존하는 작업 계획을 만든다.
 
 파일 편집에는 `apply_patch`를 사용한다. 커밋에는 `commit-harness` 스킬을 적용한다.
 
@@ -743,7 +747,7 @@ M  tests/CMakeLists.txt
 
 4단계의 전체 출력 경로는 `C:\cdda\cataclysm-dda\turn-profile-results\turn-parallel-baseline`이다.
 
-4단계의 출력 경로가 이미 존재하면 기준 프로파일을 시작하지 않는다. 존재하는 경로를 사용자에게 보고한다.
+4단계를 실행하기 전에 해당 출력 경로의 존재를 검사한다. 경로가 있으면 기준 프로파일을 시작하지 않고, 존재하는 경로를 사용자에게 보고한다. 경로가 없으면 17.3절의 기준 프로파일 명령에 이 경로를 `-OutputDirectory` 값으로 넣어 실행한다.
 
 ### 16.2 프로파일러를 병렬 작업에 맞춘다
 
@@ -755,20 +759,27 @@ M  tests/CMakeLists.txt
 
 평가 파동이 끝나면 주 스레드가 작업자별 누적 배열을 합친다. 프로파일러의 기존 열린 구간 스택을 작업자 스레드가 공유하지 않는다.
 
+프로파일 JSON의 턴 레코드는 기존 `total_cycles`를 프로세스 CPU 사이클로 유지하고, `primary_thread_cycles`를 주 스레드 CPU 사이클로 새로 기록한다. `primary_thread_cycles`는 턴 시작과 종료에서 읽은 주 스레드 CPU 사이클의 차이다.
+
 프로파일 JSON은 `worker.<측정 요소>`와 `reduce.<측정 요소>` 이름으로 새 값을 저장한다. 기존 `background.other`는 새 작업자 값을 뺀 나머지 백그라운드 사이클만 저장한다.
 
+프로파일 JSON 메타데이터는 실제 평가 스레드 수를 `turn_workers` 정수로 기록한다. 이 수는 주 스레드를 포함한다. `--turn-workers N`에서 `N`이 0보다 크면 `turn_workers`는 N과 같아야 한다. `N`이 0이면 `turn_workers`는 1 이상이어야 한다.
+
 1. 프로파일 형식 버전을 올린다.
-2. 생물 계산을 상태 갱신, 계획, 이동, 비플레이어 캐릭터 처리로 나눈다.
-3. 플레이어 상태 계산 다섯 개에 하위 측정 구간을 추가한다.
-4. 체온, 젖음, 젖음 사기 계산을 서로 구분한다.
-5. 음향 효과를 청력 손실, 위험 음악, 차량 음향, 낮은 체력 음향으로 나눈다.
-6. `map.emissions`를 필드 방출과 `mon_info_update()`로 나눈다.
-7. `map.items`를 차량 아이템과 지상 활성 아이템으로 나눈다.
-8. 작업자 CPU 사이클을 계산 그룹별로 기록한다.
-9. 병합기 CPU 사이클을 계산 그룹별로 기록한다.
-10. 턴마다 변경 레코드 수를 기록한다.
-11. 턴마다 같은 대상 충돌 수를 기록한다.
-12. HTML과 `tests/turn_profiler_test.cpp`를 새 프로파일 형식에 맞춘다.
+2. `primary_thread_cycles`를 턴 레코드, HTML, `tests/turn_profiler_test.cpp`에 추가한다.
+3. 생물 계산을 상태 갱신, 계획, 이동, 비플레이어 캐릭터 처리로 나눈다.
+4. 플레이어 상태 계산 다섯 개에 하위 측정 구간을 추가한다.
+5. 체온, 젖음, 젖음 사기 계산을 서로 구분한다.
+6. 음향 효과를 청력 손실, 위험 음악, 차량 음향, 낮은 체력 음향으로 나눈다.
+7. `map.emissions`를 필드 방출과 `mon_info_update()`로 나눈다.
+8. `map.items`를 차량 아이템과 지상 활성 아이템으로 나눈다.
+9. 작업자 CPU 사이클을 계산 그룹별로 기록한다.
+10. 병합기 CPU 사이클을 계산 그룹별로 기록한다.
+11. 턴마다 변경 레코드 수를 기록한다.
+12. 턴마다 같은 대상 충돌 수를 기록한다.
+13. JSON 메타데이터의 `turn_workers`를 기록하고 단위 테스트로 확인한다.
+14. `tools/profile-turns.ps1`이 `-TurnWorkers N`을 전달한 뒤 JSON의 `turn_workers`를 읽는다. N이 0보다 크고 두 값이 다르면 스크립트는 실패한다.
+15. HTML과 `tests/turn_profiler_test.cpp`를 새 프로파일 형식에 맞춘다.
 
 ### 16.3 공통 구조를 직렬 실행 모드로 만든다
 
@@ -903,12 +914,32 @@ M  tests/CMakeLists.txt
 & 'C:\cdda\test-game.ps1'
 ```
 
+기준 프로파일과 최종 프로파일을 실행하기 전에 아래 명령을 작업 루트에서 한 번 실행한다. 명령이 출력 디렉터리 하나라도 찾으면 프로파일을 시작하지 않는다.
+
+```powershell
+$profileRoot = 'C:\cdda\cataclysm-dda\turn-profile-results'
+$profileDirectories = @(
+    (Join-Path $profileRoot 'turn-parallel-baseline')
+) + @(1..3 | ForEach-Object {
+    Join-Path $profileRoot "turn-parallel-final-serial-$_"
+}) + @(1..3 | ForEach-Object {
+    Join-Path $profileRoot "turn-parallel-final-parallel-$_"
+})
+$occupiedDirectories = @($profileDirectories | Where-Object {
+    Test-Path -LiteralPath $_
+})
+if( $occupiedDirectories.Count -ne 0 ) {
+    throw "프로파일 출력 디렉터리가 이미 있습니다:`n$($occupiedDirectories -join "`n")"
+}
+```
+
 기준 프로파일은 작업 루트에서 아래 명령으로 실행한다.
 
 ```powershell
 pwsh -File 'C:\cdda\cataclysm-dda\tools\profile-turns.ps1' `
     -Turns 10000 `
     -Seed 'cdda-turn-profile-v1' `
+    -OutputDirectory 'C:\cdda\cataclysm-dda\turn-profile-results\turn-parallel-baseline' `
     -NoOpen
 ```
 
@@ -939,8 +970,6 @@ pwsh -File 'C:\cdda\cataclysm-dda\tools\profile-turns.ps1' `
         -NoOpen
 }
 ```
-
-여섯 출력 디렉터리 중 하나가 이미 존재하면 프로파일 실행을 시작하지 않는다. 존재하는 경로를 사용자에게 보고한다.
 
 개발 중 짧은 확인은 500턴을 사용한다. 500턴 결과는 최종 성능 판정을 대신하지 않는다.
 
