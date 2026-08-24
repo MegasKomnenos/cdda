@@ -514,10 +514,30 @@ def sweep(phase: str, root: Path | None = None) -> dict:
     return report
 
 
+def _foreign_tree(root: Path, tree: Path) -> bool:
+    """트리가 다른 저장소 소속의 worktree인가.
+
+    dag-wt 루트는 저장소 간 공유라, `.git` 링크의 gitdir가 이 저장소의 `.git` 밖을
+    가리키는 트리는 이 저장소의 잔재가 아니다. 링크 부재·판독 불가·서식 밖은
+    False다 — 소속을 판정하지 못하면 고지 쪽으로 기운다.
+    """
+    try:
+        text = (tree / ".git").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    m = re.match(r"gitdir:\s*(.+)", text.strip())
+    if not m:
+        return False
+    gitdir = Path(m.group(1).strip()).resolve()
+    own = (root / ".git").resolve()
+    return gitdir != own and own not in gitdir.parents
+
+
 def leftovers(root: Path | None = None) -> dict:
     """중단된 국면이 남긴 격리 잔재.
 
     **활성 국면의 트리·브랜치는 잔재가 아니다** — 도는 런의 정상 자산이라 제외한다.
+    **다른 저장소 소속의 트리도 잔재가 아니다**(`_foreign_tree`).
     마커를 못 읽으면 아무것도 제외하지 않는다(고지 쪽으로 기운다).
 
     읽기 전용이다 — 발견은 세션 훅이 하고 처분은 사람이 한다.
@@ -542,7 +562,9 @@ def leftovers(root: Path | None = None) -> dict:
         heads = [f"{ph}{WT_SEP}" for ph in active]
         trees = sorted(
             str(p) for p in base.iterdir()
-            if p.is_dir() and not any(p.name.startswith(h) for h in heads)
+            if p.is_dir()
+            and not any(p.name.startswith(h) for h in heads)
+            and not _foreign_tree(root, p)
         )
     return {"worktrees": trees, "branches": branches}
 

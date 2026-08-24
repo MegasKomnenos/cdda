@@ -604,6 +604,24 @@ class LeftoverScopeTest(unittest.TestCase):
         self.assertEqual(self._names(), ["도는국면+2.5", "죽은국면+1"])
         self.assertEqual(self._names(), ["도는국면+2.5", "죽은국면+1"])
 
+    def test_a_tree_owned_by_another_repo_is_not_a_leftover(self):
+        """dag-wt 루트는 저장소 간 공유다 — 남의 트리를 이 저장소의 잔재로 세지 않는다."""
+        other_gitdir = Path(self._tmp.name) / "other-repo" / ".git" / "worktrees" / "남의국면+1"
+        other_gitdir.mkdir(parents=True)
+        foreign = self.wt_root / "남의국면+1"
+        foreign.mkdir()
+        (foreign / ".git").write_text(f"gitdir: {other_gitdir}\n", encoding="utf-8")
+        self.assertEqual(self._names(), ["도는국면+2.5", "죽은국면+1"])
+
+    def test_a_tree_owned_by_this_repo_stays_a_leftover(self):
+        """소속이 이 저장소로 확인된 트리는 그대로 잔재다."""
+        own_gitdir = self.root / ".git" / "worktrees" / "죽은국면+1"
+        own_gitdir.mkdir(parents=True)
+        (self.wt_root / "죽은국면+1" / ".git").write_text(
+            f"gitdir: {own_gitdir}\n", encoding="utf-8"
+        )
+        self.assertEqual(self._names(), ["도는국면+2.5", "죽은국면+1"])
+
 
 class SyntheticRepoTest(unittest.TestCase):
     """합성 저장소 하나. 격리 시험과 관문 시험이 같은 기반을 쓴다."""
