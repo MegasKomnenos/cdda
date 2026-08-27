@@ -2,8 +2,8 @@
 """런타임 스킬 사본 생성기.
 
 정본 `.claude/skills/`와 타깃 런타임 디렉토리 `.agents/`의 `diff/`
-디렉토리를 병합해 타깃의 `skills/` 트리를 생성한다. 타깃 skills 트리는
-생성물이며 수기 편집하지 않는다. 절차 정본은 writing-skills
+디렉토리를 병합해 타깃의 `skills/` 트리와 `hooks.json`을 생성한다.
+타깃 산출물은 수기 편집하지 않는다. 절차 정본은 writing-skills
 `references/멀티런타임_동기화.md`.
 
 diff/ 디렉토리 구성:
@@ -140,6 +140,17 @@ def transform(rel: str, raw: bytes, rules) -> bytes:
     return text.encode("utf-8")
 
 
+def build_hooks(rules) -> bytes | None:
+    """Claude 설정의 hooks 객체를 타깃 런타임 훅 등록 파일로 변환한다."""
+    settings_path = ROOT / ".claude" / "settings.json"
+    if not settings_path.is_file():
+        return None
+    settings = json.loads(settings_path.read_text(encoding="utf-8-sig"))
+    hooks = settings.get("hooks", {})
+    text = json.dumps(hooks, ensure_ascii=False, indent=2) + "\n"
+    return apply_substitutions(text, rules.get("substitutions", [])).encode("utf-8")
+
+
 def sha1(data: bytes) -> str:
     return hashlib.sha1(data).hexdigest()
 
@@ -152,6 +163,8 @@ def build_target(target: str, check: bool, bless: bool) -> tuple[bool, list[str]
     diff_dir = tdir / "diff"
     out_root = tdir / "skills"
     rules = load_rules(diff_dir)
+    hooks_path = tdir / "hooks.json"
+    hooks = build_hooks(rules)
     manifest_path = diff_dir / "_manifest.json"
     manifest = (
         json.loads(manifest_path.read_text(encoding="utf-8-sig"))
@@ -210,7 +223,12 @@ def build_target(target: str, check: bool, bless: bool) -> tuple[bool, list[str]
         for r in deleted:
             ok = False
             msgs.append(f"[{target}] 드리프트(잔존 파일): skills/{r}")
-        if not (created or updated or deleted):
+        if hooks is not None and (not hooks_path.is_file() or hooks_path.read_bytes() != hooks):
+            ok = False
+            msgs.append(f"[{target}] 드리프트(생성 필요): hooks.json")
+        if not (created or updated or deleted) and (
+            hooks is None or (hooks_path.is_file() and hooks_path.read_bytes() == hooks)
+        ):
             msgs.append(f"[{target}] 드리프트 없음 ({len(outputs)}파일)")
         return ok, msgs
 
@@ -220,6 +238,8 @@ def build_target(target: str, check: bool, bless: bool) -> tuple[bool, list[str]
         dest.write_bytes(outputs[r])
     for r in deleted:
         (out_root / r).unlink()
+    if hooks is not None:
+        hooks_path.write_bytes(hooks)
     # 빈 디렉토리 정리
     for d in sorted((x for x in out_root.rglob("*") if x.is_dir()), reverse=True):
         try:

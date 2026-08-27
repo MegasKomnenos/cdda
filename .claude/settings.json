@@ -1,11 +1,26 @@
 {
   "$comment": "Committed project policy. CLAUDE.md is advisory; the HARD guards live here. Personal overrides go in .claude/settings.local.json (gitignored). Hook 경로는 $CLAUDE_PROJECT_DIR(프로젝트 루트, Claude Code가 문자열 치환) 기준 절대경로로 통일한다 — 절대경로 하드코딩(클론·이동 시 조용한 실패)과 상대경로(hook 실행 CWD 드리프트) 두 함정을 함께 제거한다.",
   "permissions": {
+    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(python .claude/skills/extract-documents/scripts/extract_all.py *)",
       "Bash(python3 .claude/skills/extract-documents/scripts/extract_all.py *)"
     ],
-    "deny": ["PowerShell","EndConversation","Monitor","EnterWorktree","ExitWorktree","ScheduleWakeup","AskUserQuestion","EnterPlanMode","ExitPlanMode","DesignSync","NotebookEdit","ReportFindings","PushNotification"]
+    "deny": [
+      "PowerShell",
+      "EndConversation",
+      "Monitor",
+      "EnterWorktree",
+      "ExitWorktree",
+      "ScheduleWakeup",
+      "AskUserQuestion",
+      "EnterPlanMode",
+      "ExitPlanMode",
+      "DesignSync",
+      "NotebookEdit",
+      "ReportFindings",
+      "PushNotification"
+    ]
   },
   "disableBundledSkills": true,
   "disableWorkflows": true,
@@ -82,6 +97,7 @@
   },
   "env": {
     "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "40",
-    "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION": "400"
+    "CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION": "400",
+    "CLAUDE_SUBAGENT_BG_SHELL_MAX_MS": "43200000"
   }
 }

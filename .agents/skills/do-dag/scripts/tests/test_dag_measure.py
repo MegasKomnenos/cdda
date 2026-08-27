@@ -232,7 +232,7 @@ class TestBudget(unittest.TestCase):
         lines = m.run_budget(m._expand("소.md", self.root)[0], self.root, "opus")
         self.assertIn("예산 안", "\n".join(lines))
         big = self.root / "대.md"
-        big.write_text("x" * 700_000, encoding="utf-8")  # 좁은문자 ~140k tok
+        big.write_text("x" * 1_000_000, encoding="utf-8")  # 좁은문자 ~200k tok
         lines = m.run_budget([big], self.root, "opus")
         self.assertIn("예산 초과", "\n".join(lines))
         lines = m.run_budget([big], self.root, "fable")
@@ -249,7 +249,7 @@ class TestBudget(unittest.TestCase):
         자리에서 진다.
         """
         big = self.root / "대.md"
-        big.write_text("x" * 700_000, encoding="utf-8")
+        big.write_text("x" * 1_000_000, encoding="utf-8")
         joined = "\n".join(m.run_budget([big], self.root, "opus"))
         self.assertIn("예산 초과", joined)
         self.assertNotIn("상향", joined)
@@ -281,8 +281,8 @@ class TestBudget(unittest.TestCase):
         """
         구조 = [
             ("행 2 전개(저작 83,474바이트)", m.est_required(71_612, 83_474), 185_647),
-            ("2.1 운전성 렌즈", m.est_required(39_719 + m.est_pending(78_271), 0), 158_232),
-            ("2.2 정합성 렌즈", m.est_required(60_707 + m.est_pending(78_271), 0), 154_332),
+            ("2.1 운전성 수리자", m.est_required(39_719 + m.est_pending(78_271), 0), 158_232),
+            ("2.2 정합성 수리자", m.est_required(60_707 + m.est_pending(78_271), 0), 154_332),
         ]
         for 이름, 견적, 실측 in 구조:
             self.assertGreater(견적, 실측 * 0.95, f"{이름}: 낙관 {견적:,} < 실측 {실측:,}")

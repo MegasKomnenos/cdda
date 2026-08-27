@@ -1,0 +1,61 @@
+{
+  "SessionStart": [
+    {
+      "matcher": "startup|clear|compact",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python \"$CLAUDE_PROJECT_DIR\"/.agents/skills/do-dag/scripts/hooks/dag_session_note.py",
+          "timeout": 10
+        },
+        {
+          "type": "command",
+          "command": "python \"$CLAUDE_PROJECT_DIR\"/.agents/skills/ponytail/scripts/inject_ponytail.py",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "SubagentStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python \"$CLAUDE_PROJECT_DIR\"/.agents/skills/ponytail/scripts/inject_ponytail.py",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python \"$CLAUDE_PROJECT_DIR\"/.agents/skills/do-dag/scripts/hooks/dag_session_note.py",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": "Bash|Grep",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python -m graphify hook-guard search"
+        }
+      ]
+    },
+    {
+      "matcher": "Read|Glob",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python -m graphify hook-guard read"
+        }
+      ]
+    }
+  ]
+}

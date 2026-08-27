@@ -16,14 +16,15 @@
 ⑥ 순환 부재.
 ⑦ 좌표 실재 — 파견문이 파일시스템에 있는가. 그 파견문의 `계약:` 슬롯과 `불변식:`
    슬롯이 실재하는 파일을 싣는가. `불변식:` 슬롯이 상위 전개의 불변식 전건을 승계하고,
-   그 좌표가 읽기 목록과 예산에 실렸는가. `모델 배정 근거:` 슬롯이 채워졌는가.
+   그 좌표가 읽기 목록과 예산에 실렸는가. `모델 배정 근거:`와 `반환:` 슬롯이
+   채워졌는가.
    【완결상태 · 완 · 비준】 행의 완료 신호가 전건 있고 비지 않았는가. 검증런 계약을
    적재한 완결 행은 동결·장부·종료보고와 장부의 라운드 1 본표·결산을 갖췄는가.
    그 종료보고의 「발견」 절에 항목이 있으면 같은 층의 전개 행이 그 종료보고를
    `정본:` 슬롯에 싣는가(검토전개 — `계약/검증런.md` 「발견 처리」).
    완결된 싱크는 결산 frontmatter의 `상태`가 반환과 같고 `단계`가 원장의
    종착값이어야 한다.
-⑧ 게이트 결정 — 【완결상태 · 완 · 비준】 게이트의 결정 파일에 사용자 축자 절이 채워졌고
+⑧ 게이트 결정 — 【완결상태 · 완 · 비준】 게이트의 결정 파일에 사용자 응답과 확정 문면이 채워졌고
    frontmatter `상태`가 `결정됨`인가. 서식 플레이스홀더(`{…}`)만 남은 절은 빈 절이다.
    그 결정 파일을 선행 사슬의 어느 행이 낳는가. 그 게이트를 선행으로 지목해 일하는
    행이 전개이고 그 파견문의 `정본:` 슬롯이 결정 좌표를 싣는가.
@@ -43,13 +44,13 @@ partial은 **살아 있는 전개의 서브트리를 발견에서 제외한다.*
 `--sink-return <행번호> <첫 낱말>`은 두 모드와 별개인 반환 전용 게이트다. 전체 표를
 다시 재지 않고 실제 싱크 반환과 결산 frontmatter만 대조한다.
 
-목표 충실성·분해 타당성 같은 판단 성분은 코드가 아니라 렌즈와 판정 처분 전개의 몫이다.
+목표 충실성·분해 타당성 같은 판단 성분은 코드가 아니라 전개 뒤 검증런의 몫이다.
 
 사용:
     python dag_check.py --table .sdd/dag/<국면>/파견표.md
     python dag_check.py --table ... --mode partial
     python dag_check.py --table ... --mode partial --writer 2.5
-    python dag_check.py --table ... --sink-return 2.z 완료미충족
+    python dag_check.py --table ... --sink-return 2.z 예외
     (exit 0 = 무발견, 1 = 발견. 발견 목록은 stdout)
 """
 
@@ -98,6 +99,10 @@ REPORT_SUFFIX = "-보고.md"
 SINK_RETURN_WORDS = (
     "DONE",
     "DONE-비준",
+    "상신",
+    "예외",
+)
+SINK_EXCEPTION_STATUSES = (
     "귀속불일치",
     "완료미충족",
     "병합충돌",
@@ -160,6 +165,10 @@ _TOP_LEVEL_SLOT = re.compile(r"^[-*][ \t]+[^\n:]+[ \t]*:", re.MULTILINE)
 _ASSIGN_SLOT = re.compile(
     r"^[ \t]*[-*]?[ \t]*모델 배정 근거[ \t]*:[ \t]*(.*)$", re.MULTILINE
 )
+
+# 파견문 최상위 슬롯 `- 반환: <공통 첫 줄과 역할 확장>`. 최종 반환이 공통 계약과
+# 역할 계약을 잇는 자리다.
+_RETURN_SLOT = re.compile(r"^[ \t]*[-*]?[ \t]*반환[ \t]*:[ \t]*(.*)$", re.MULTILINE)
 
 
 def _cell(raw: str) -> str:
@@ -785,10 +794,15 @@ def check_sink_return(
             continue
         text = target.read_text(encoding="utf-8", errors="replace")
         status = _frontmatter(text, "상태")
-        if status != return_word:
+        if return_word in ("DONE", "DONE-비준", "상신") and status != return_word:
             findings.append(
                 f"[반환] 싱크 {row_id}의 첫 낱말은 '{return_word}'인데 결산 상태가"
                 f" '{status or '없음'}'이다: {sig}"
+            )
+        if return_word == "예외" and status not in SINK_EXCEPTION_STATUSES:
+            findings.append(
+                f"[반환] 싱크 {row_id}이 예외로 반환했는데 결산 상태가"
+                f" '{status or '없음'}'이다(비완결 상태여야 한다): {sig}"
             )
         if return_word in ("DONE", "DONE-비준"):
             stage = _frontmatter(text, "단계")
@@ -847,6 +861,7 @@ def check_briefs(rows: list[Row], run_dir: Path, hidden: set[str] | None = None)
         findings += _check_contract(r, text, run_dir)
         findings += _check_invariants(r, rows, text, run_dir)
         findings += _check_assignment(r, text)
+        findings += _check_return(r, text)
     return findings
 
 
@@ -856,12 +871,24 @@ def _check_assignment(r: Row, text: str) -> list[str]:
     배정 이탈은 행마다 새로 도출한다 — 앞선 행의 이탈은 선례가 되지 못하고
     임계값 대입은 도출이 아니다(`references/서식.md` 배정표). 슬롯이 비면 그
     도출이 어디에도 없다. 서식 플레이스홀더만 남은 슬롯은 빈 슬롯이다.
-    도출이 배정표 문언에 서는지는 정합성 렌즈가 본다.
+    도출이 배정표 문언에 서는지는 전개 뒤 검증런의 정합성 수리자가 본다.
     """
     for m in _ASSIGN_SLOT.finditer(text):
         if _PLACEHOLDER.sub("", m.group(1)).strip():
             return []
     return [f"[실재] 행 {r.id}의 파견문에 `모델 배정 근거:` 슬롯이 없다: {r.brief}"]
+
+
+def _check_return(r: Row, text: str) -> list[str]:
+    """파견문이 공통 반환 첫 줄과 역할 확장의 결선 자리를 갖는가."""
+    matches = list(_RETURN_SLOT.finditer(text))
+    for match in matches:
+        if _PLACEHOLDER.sub("", match.group(1)).strip():
+            return []
+    if not matches and r.state in DONE_STATES:
+        # 반환 슬롯 도입 전 완결된 행은 파일 수정 금지다. 소급 파손하지 않는다.
+        return []
+    return [f"[실재] 행 {r.id}의 파견문에 `반환:` 슬롯이 없다: {r.brief}"]
 
 
 def _check_contract(r: Row, text: str, run_dir: Path) -> list[str]:
@@ -870,7 +897,7 @@ def _check_contract(r: Row, text: str, run_dir: Path) -> list[str]:
     계약 문면은 파견문에 전사되지 않고 `계약/` 아래 산다(`references/서식.md`
     「계약 자산」). 슬롯이 비면 그 에이전트는 자기 역할 계약 없이 돈다.
     이 검사가 보는 것은 슬롯의 존재와 좌표의 실재까지다 — 역할에 맞는 계약이
-    실렸는지는 배치표를 읽는 전개와 정합성 렌즈의 몫이다.
+    실렸는지는 배치표를 읽는 전개와 전개 뒤 검증런의 정합성 수리자 몫이다.
     """
     coords = _contract_coords(text)
     if not coords:
@@ -992,7 +1019,7 @@ def _check_invariants(r: Row, rows: list[Row], text: str, run_dir: Path) -> list
 
 
 def _decision_body(text: str) -> str:
-    """결정 파일의 사용자 축자 절. 「메인 결정」은 다른 절이다.
+    """결정 파일의 사용자 응답·확정 문면 절. 「메인 결정」은 다른 절이다.
 
     플레이스홀더를 걷어낸 뒤 판정한다 — 결정 전 파일은 그 절에 `{…}`만 담고 있다.
     """

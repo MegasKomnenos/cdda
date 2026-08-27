@@ -23,3 +23,6 @@ graphify-out/
 # wayfinder가 `gh issue create --body-file`에 넘기려고 만드는 임시 본문 파일.
 # 지도와 티켓의 정본은 이슈 트래커이므로 그 사본을 추적하지 않는다.
 .wayfinder-tmp/
+
+# do-dag가 현재 활성 국면과 일시 허가를 기록하는 로컬 상태 파일.
+.sdd/dag/marker.json
