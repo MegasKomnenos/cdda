@@ -14,25 +14,29 @@
 - 모델_프리셋: codex-full
 - 검증런_모델_프리셋: codex-full
 - 계약: C:\cdda\.claude\skills\do-dag\계약\공통.md, C:\cdda\.claude\skills\do-dag\계약\싱크.md
-- 불변식: C:\cdda\.sdd\dag\parallel-turn-impl\행\0.d\불변식.md
+- 불변식: C:\cdda\.sdd\dag\parallel-turn-impl\행\0.d\불변식.md, C:\cdda\.sdd\dag\parallel-turn-impl\행\0.d\불변식-2.md
 - 겨냥: C:\cdda\.sdd\dag\parallel-turn-impl\행\z-결산.md, C:\cdda\.sdd\dag\parallel-turn-impl\이음새.md, parallel-turn-impl 마커
-- 정본: C:\cdda\.sdd\dag\parallel-turn-impl\이음새.md, C:\cdda\.sdd\dag\parallel-turn-impl\행\3.d\z-결산.md
-- 읽기 목록: C:\cdda\.sdd\dag\parallel-turn-impl\이음새.md, C:\cdda\.sdd\dag\parallel-turn-impl\행\3.d\z-결산.md, C:\cdda\.sdd\dag\parallel-turn-impl\행\0.d\불변식.md, C:\cdda\.claude\skills\do-dag\계약\공통.md, C:\cdda\.claude\skills\do-dag\계약\싱크.md
+- 정본: C:\cdda\.sdd\dag\parallel-turn-impl\결정\사용자확정-테스트하네스연결.md, C:\cdda\.sdd\dag\parallel-turn-impl\이음새.md, C:\cdda\.sdd\dag\parallel-turn-impl\행\3.d\z-결산.md
+- 읽기 목록: C:\cdda\.sdd\dag\parallel-turn-impl\결정\사용자확정-테스트하네스연결.md, C:\cdda\.sdd\dag\parallel-turn-impl\이음새.md, C:\cdda\.sdd\dag\parallel-turn-impl\행\3.d\z-결산.md, C:\cdda\.sdd\dag\parallel-turn-impl\행\0.d\불변식.md, C:\cdda\.sdd\dag\parallel-turn-impl\행\0.d\불변식-2.md, C:\cdda\.claude\skills\do-dag\계약\공통.md, C:\cdda\.claude\skills\do-dag\계약\싱크.md
 - 모델 배정 근거: 배정표 codex-full(싱크 gpt-5.6-terra low). 단계 원장에 고정된 절차를 집행한다.
 - 예산:
   [실측기 budget]
-  명령: python dag_measure.py budget --files C:\cdda\.sdd\dag\parallel-turn-impl\행\0.d\불변식.md,C:\cdda\.claude\skills\do-dag\계약\공통.md,C:\cdda\.claude\skills\do-dag\계약\싱크.md --model gpt-5.6-terra --writes 16000 --pending 48000 --root C:\cdda
-  시각: 2026-08-25T15:17:06Z
-  대상해시: sha1:b29ed2c223f2
+  명령: python dag_measure.py budget --files C:\cdda\.sdd\dag\parallel-turn-impl\행\0.d\불변식.md,C:\cdda\.sdd\dag\parallel-turn-impl\행\0.d\불변식-2.md,C:\cdda\.sdd\dag\parallel-turn-impl\결정\사용자확정-테스트하네스연결.md,C:\cdda\.sdd\dag\parallel-turn-impl\이음새.md,C:\cdda\.sdd\dag\parallel-turn-impl\행\3.d\z-결산.md,C:\cdda\.claude\skills\do-dag\계약\공통.md,C:\cdda\.claude\skills\do-dag\계약\싱크.md --model gpt-5.6-terra --writes 16000 --pending 48000 --root C:\cdda
+  시각: 2026-08-28T02:46:30Z
+  대상해시: sha1:56e214a9d421
+  미해석: C:\cdda\.sdd\dag\parallel-turn-impl\행\3.d\z-결산.md
   .claude\skills\do-dag\계약\공통.md: ~4,077tok
-  .claude\skills\do-dag\계약\싱크.md: ~10,040tok
+  .claude\skills\do-dag\계약\싱크.md: ~10,034tok
+  .sdd\dag\parallel-turn-impl\결정\사용자확정-테스트하네스연결.md: ~2,201tok
+  .sdd\dag\parallel-turn-impl\이음새.md: ~4,362tok
+  .sdd\dag\parallel-turn-impl\행\0.d\불변식-2.md: ~609tok
   .sdd\dag\parallel-turn-impl\행\0.d\불변식.md: ~930tok
   미존재 정본: ~25,263tok (48,000바이트 — 측정 시점 미존재)
-  읽기 합계: ~40,310tok (문자계열 단가 견적)
+  읽기 합계: ~47,476tok (문자계열 단가 견적)
   하네스 기저: ~28,000tok (시스템 프롬프트·툴 스키마·스킬 목록 — 실측 상수)
   도구 왕복: ~10,000tok (셸·검색 결과, 편집 회신 — 실측 상수)
   출력 유보: ~35,000tok (하한 — 저작 예상 16,000바이트는 하한 미달)
-  소요 견적: ~113,310tok
+  소요 견적: ~120,476tok
   판정: gpt-5.6-terra 250,000 대비 예산 안
   [/실측기]
 - 산출: C:\cdda\.sdd\dag\parallel-turn-impl\행\z-결산.md
@@ -42,4 +46,4 @@
 
 - 국면명: parallel-turn-impl
 - 이음새 원장: C:\cdda\.sdd\dag\parallel-turn-impl\이음새.md
-
+- 테스트 증거: 행 3 결산이 판정한 빌드 기록, 데이터 검증 기록, 명세, `result.json`, 기능 인수, 성능 인수를 최종 결산한다. 같은 테스트를 다시 실행하지 않는다.
