@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "seed": 7,
+  "chunks": [
+    {
+      "id": "strings",
+      "tests": [
+        "string_starts_with",
+        "string_ends_with"
+      ]
+    }
+  ]
+}

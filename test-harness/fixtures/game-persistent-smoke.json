@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "seed": 17,
+  "chunks": [
+    {
+      "id": "initialization",
+      "tests": [
+        "test_data_initialization"
+      ]
+    },
+    {
+      "id": "game-test",
+      "tests": [
+        "monster_speed_description"
+      ]
+    }
+  ]
+}
