@@ -20,9 +20,17 @@ graphify-out/
 # CDDA 컴파일 산출물, 배포본, 로컬 저장 파일.
 /build/
 
+# CDDA 테스트 바이너리를 --user-dir 없이 루트에서 실행하면 생기는 기본 사용자 디렉토리.
+/test_user_dir/
+
 # wayfinder가 `gh issue create --body-file`에 넘기려고 만드는 임시 본문 파일.
 # 지도와 티켓의 정본은 이슈 트래커이므로 그 사본을 추적하지 않는다.
 .wayfinder-tmp/
 
 # do-dag가 현재 활성 국면과 일시 허가를 기록하는 로컬 상태 파일.
 .sdd/dag/marker.json
+
+# do-dag Codex 행의 stderr 실행 로그(`행/_로그_<행번호>.txt`와 그 예외 보존본). 런 디렉토리와 그 이관본에 함께 적용한다.
+# 행당 수 MB의 런타임 전사본이다. 행의 결과는 반환·보고 파일이 담는다.
+.sdd/**/*로그*.txt
+/dag/**/*로그*.txt
