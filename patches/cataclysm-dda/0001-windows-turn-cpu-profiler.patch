@@ -1,0 +1,2557 @@
+From 9649836239c476dcd9bdd00cee6bb1c3df1d9074 Mon Sep 17 00:00:00 2001
+From: MegasKomnenos <35184490+MegasKomnenos@users.noreply.github.com>
+Date: Mon, 24 Aug 2026 18:11:45 +0900
+Subject: [PATCH 1/3] =?UTF-8?q?Windows=20=ED=84=B4=20CPU=20=ED=94=84?=
+ =?UTF-8?q?=EB=A1=9C=ED=8C=8C=EC=9D=BC=EB=9F=AC=EB=A5=BC=20=EC=B6=94?=
+ =?UTF-8?q?=EA=B0=80=ED=95=9C=EB=8B=A4?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .gitignore                   |   2 +
+ CMakeLists.txt               |   7 +
+ src/CMakeLists.txt           |  27 +-
+ src/do_turn.cpp              | 508 +++++++++++++++++++++-------------
+ src/main.cpp                 | 214 +++++++++++++-
+ src/main_menu.cpp            |  29 ++
+ src/newcharacter.cpp         |  26 +-
+ src/turn_profile_character.h |  13 +
+ src/turn_profiler.cpp        | 518 ++++++++++++++++++++++++++++++++++
+ src/turn_profiler.h          | 123 +++++++++
+ tests/CMakeLists.txt         |  13 +
+ tests/turn_profiler_test.cpp | 188 +++++++++++++
+ tools/profile-turns.ps1      | 521 +++++++++++++++++++++++++++++++++++
+ 13 files changed, 1988 insertions(+), 201 deletions(-)
+ create mode 100644 src/turn_profile_character.h
+ create mode 100644 src/turn_profiler.cpp
+ create mode 100644 src/turn_profiler.h
+ create mode 100644 tests/turn_profiler_test.cpp
+ create mode 100644 tools/profile-turns.ps1
+
+diff --git a/.gitignore b/.gitignore
+index 943a9249d62..b5435055070 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -18,6 +18,8 @@
+ !/.vscode/extensions.json
+ !/.vscode/msbuild.ps1
+ 
++/turn-profile-results/
++
+ !src/chkjson
+ *.7z
+ *.a
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 9aeaa0d513b..26e2c15c334 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -43,6 +43,7 @@ option(CATA_CLANG_TIDY_PLUGIN "Build Cata's custom clang-tidy checks as a plugin
+ option(CATA_CLANG_TIDY_EXECUTABLE "Build Cata's custom clang-tidy checks as an executable" "OFF")
+ option(WARN_STALE_DATA "Warn if file integrity check fails" "OFF")
+ option(TESTS "Compile Cata's tests" "ON")
++option(TURN_PROFILING "Compile the Windows simulation-turn CPU profiler" "OFF")
+ set(CATA_CLANG_TIDY_INCLUDE_DIR "" CACHE STRING
+         "Path to internal clang-tidy headers required for plugin (e.g. ClangTidy.h)")
+ set(CATA_CHECK_CLANG_TIDY "" CACHE STRING "Path to check_clang_tidy.py for plugin tests")
+@@ -53,6 +54,12 @@ if (TESTS)
+ include(CTest)
+ endif()
+ 
++if(TURN_PROFILING)
++    if(NOT WIN32)
++        message(FATAL_ERROR "TURN_PROFILING is supported only on Windows")
++    endif()
++endif()
++
+ message(STATUS "${PROJECT_NAME} build environment --")
+ message(STATUS "Build realm is: ${CMAKE_SYSTEM_NAME} ${CMAKE_HOST_SYSTEM_PROCESSOR}")
+ 
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index d582db05c62..e1c52c5fdc6 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -17,6 +17,22 @@ file(GLOB CATACLYSM_DDA_SOURCES
+     ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/cata_allocator_c.c)
+ 
++set(TURN_PROFILER_CPP ${CMAKE_CURRENT_SOURCE_DIR}/turn_profiler.cpp)
++list(REMOVE_ITEM CATACLYSM_DDA_SOURCES ${TURN_PROFILER_CPP})
++set(TURN_PROFILER_EXECUTABLE_SOURCES)
++if(TURN_PROFILING)
++    list(APPEND TURN_PROFILER_EXECUTABLE_SOURCES ${TURN_PROFILER_CPP})
++    set_source_files_properties(
++        ${CMAKE_CURRENT_SOURCE_DIR}/do_turn.cpp
++        ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
++        ${CMAKE_CURRENT_SOURCE_DIR}/main_menu.cpp
++        ${CMAKE_CURRENT_SOURCE_DIR}/newcharacter.cpp
++        ${CMAKE_CURRENT_SOURCE_DIR}/turn_profiler.cpp
++        PROPERTIES
++            COMPILE_DEFINITIONS CATA_ENABLE_TURN_PROFILER
++            SKIP_PRECOMPILE_HEADERS ON)
++endif()
++
+ if (MSVC)
+     set_source_files_properties(
+         ${CMAKE_CURRENT_SOURCE_DIR}/mapgen.cpp
+@@ -35,6 +51,9 @@ endif()
+ list(REMOVE_ITEM CATACLYSM_DDA_SOURCES ${MAIN_CPP} ${MESSAGES_CPP})
+ 
+ file(GLOB CATACLYSM_DDA_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/*.h)
++list(REMOVE_ITEM CATACLYSM_DDA_HEADERS
++    ${CMAKE_CURRENT_SOURCE_DIR}/turn_profile_character.h
++    ${CMAKE_CURRENT_SOURCE_DIR}/turn_profiler.h)
+ 
+ # Get GIT version strings
+ add_custom_target(
+@@ -63,6 +82,7 @@ if (TILES)
+                 cataclysm-tiles WIN32
+                 ${MAIN_CPP}
+                 ${MESSAGES_CPP}
++                ${TURN_PROFILER_EXECUTABLE_SOURCES}
+                 ${RESOURCE_RC})
+         if(MSYS2)
+             set(_KEEP $<$<CONFIG:RelWithDebInfo,Debug>:objcopy
+@@ -89,7 +109,8 @@ if (TILES)
+     else ()
+         add_executable(cataclysm-tiles
+                 ${MAIN_CPP}
+-                ${MESSAGES_CPP})
++                ${MESSAGES_CPP}
++                ${TURN_PROFILER_EXECUTABLE_SOURCES})
+     endif ()
+ 
+     add_dependencies(cataclysm-tiles-common get_version)
+@@ -247,6 +268,7 @@ if (CURSES)
+         add_executable(cataclysm
+                 ${MAIN_CPP}
+                 ${MESSAGES_CPP}
++                ${TURN_PROFILER_EXECUTABLE_SOURCES}
+                 ${RESOURCE_RC})
+         if(NOT MINGW)
+             # Use only our RT_MANIFEST from resource.rc
+@@ -257,7 +279,8 @@ if (CURSES)
+     else ()
+         add_executable(cataclysm
+                 ${MAIN_CPP}
+-                ${MESSAGES_CPP})
++                ${MESSAGES_CPP}
++                ${TURN_PROFILER_EXECUTABLE_SOURCES})
+     endif ()
+ 
+     add_dependencies(cataclysm-common get_version)
+diff --git a/src/do_turn.cpp b/src/do_turn.cpp
+index 2a6eb9e3c0d..78d37a3fbfe 100644
+--- a/src/do_turn.cpp
++++ b/src/do_turn.cpp
+@@ -71,9 +71,10 @@
+ #include "string_formatter.h"
+ #include "timed_event.h"
+ #include "translations.h"
++#include "turn_profiler.h"
+ #include "type_id.h"
+-#include "uilist.h"
+ #include "ui_manager.h"
++#include "uilist.h"
+ #include "units.h"
+ #include "vehicle.h"
+ #include "vpart_position.h"
+@@ -525,274 +526,386 @@ bool game::do_turn()
+         return turn_handler::cleanup_at_end();
+     }
+ 
+-    drain_renderer_recovery();
+-
+     weather_manager &weather = get_weather();
++    avatar &u = get_avatar();
++    map &m = get_map();
+ 
+-    // Increment game turn
+-    if( new_game ) {
+-        new_game = false;
+-        weather.on_game_start();
+-    } else {
+-        gamemode->per_turn();
+-        calendar::turn += 1_turns;
+-    }
+-    //used for dimension swapping
+-    if( swapping_dimensions ) {
+-        swapping_dimensions = false;
+-    }
+-    play_music( music::get_music_id_string() );
++    {
++        CATA_TURN_PROFILE_SCOPE( "turn.prelude" );
++        drain_renderer_recovery();
+ 
+-    // starting a new turn, clear out temperature cache
+-    weather.temperature_cache.clear();
++        // Increment game turn
++        if( new_game ) {
++            new_game = false;
++            weather.on_game_start();
++        } else {
++            gamemode->per_turn();
++            calendar::turn += 1_turns;
++        }
++        // used for dimension swapping
++        if( swapping_dimensions ) {
++            swapping_dimensions = false;
++        }
++        play_music( music::get_music_id_string() );
+ 
+-    if( npcs_dirty ) {
+-        load_npcs();
+-    }
++        // starting a new turn, clear out temperature cache
++        weather.temperature_cache.clear();
+ 
+-    timed_event_manager &timed_events = get_timed_events();
+-    timed_events.process();
+-    get_item_wakeups().process( calendar::turn );
+-    mission::process_all();
+-    avatar &u = get_avatar();
+-    map &m = get_map();
+-    // If controlling a vehicle that is owned by someone else
+-    if( u.in_vehicle && u.controlling_vehicle ) {
+-        vehicle *veh = veh_pointer_or_null( m.veh_at( u.pos_bub() ) );
+-        if( veh && !veh->handle_potential_theft( u, true ) ) {
+-            veh->handle_potential_theft( u, false, false );
++        if( npcs_dirty ) {
++            load_npcs();
+         }
+     }
+ 
+-    // If you're inside a wall or something and haven't been telefragged, let's get you out.
+-    if( ( m.impassable( u.pos_bub() ) && !m.impassable_field_at( u.pos_bub() ) ) &&
+-        !m.has_flag( ter_furn_flag::TFLAG_CLIMBABLE, u.pos_bub() ) ) {
+-        u.stagger();
++    {
++        CATA_TURN_PROFILE_SCOPE( "events" );
++        timed_event_manager &timed_events = get_timed_events();
++        timed_events.process();
++        get_item_wakeups().process( calendar::turn );
++        mission::process_all();
+     }
+ 
+-    // If riding a horse - chance to spook
+-    if( u.is_mounted() ) {
+-        u.check_mount_is_spooked();
+-    }
+-    if( calendar::once_every( 1_days ) ) {
+-        overmap_buffer.process_mongroups();
+-    }
++    {
++        CATA_TURN_PROFILE_SCOPE( "player.safety" );
++        // If controlling a vehicle that is owned by someone else
++        if( u.in_vehicle && u.controlling_vehicle ) {
++            vehicle *veh = veh_pointer_or_null( m.veh_at( u.pos_bub() ) );
++            if( veh && !veh->handle_potential_theft( u, true ) ) {
++                veh->handle_potential_theft( u, false, false );
++            }
++        }
+ 
+-    // Move hordes every turn, move_hordes has its own rate limiting
+-    overmap_buffer.move_hordes();
+-    if( calendar::once_every( time_duration::from_minutes( 2.5 ) ) ) {
+-        if( u.has_trait( trait_HAS_NEMESIS ) ) {
+-            overmap_buffer.move_nemesis();
++        // If you're inside a wall or something and haven't been telefragged,
++        // let's get you out.
++        if( ( m.impassable( u.pos_bub() ) && !m.impassable_field_at( u.pos_bub() ) ) &&
++            !m.has_flag( ter_furn_flag::TFLAG_CLIMBABLE, u.pos_bub() ) ) {
++            u.stagger();
++        }
++
++        // If riding a horse - chance to spook
++        if( u.is_mounted() ) {
++            u.check_mount_is_spooked();
+         }
+     }
+ 
+-    debug_hour_timer.print_time();
++    {
++        CATA_TURN_PROFILE_SCOPE( "overmap.core" );
++        if( calendar::once_every( 1_days ) ) {
++            overmap_buffer.process_mongroups();
++        }
+ 
+-    u.update_body();
++        // Move hordes every turn, move_hordes has its own rate limiting
++        overmap_buffer.move_hordes();
++        if( calendar::once_every( time_duration::from_minutes( 2.5 ) ) ) {
++            if( u.has_trait( trait_HAS_NEMESIS ) ) {
++                overmap_buffer.move_nemesis();
++            }
++        }
++    }
+ 
+-    // Auto-save if autosave is enabled
+-    if( get_option<bool>( "AUTOSAVE" ) &&
+-        calendar::once_every( 1_turns * get_option<int>( "AUTOSAVE_TURNS" ) ) &&
+-        !u.is_dead_state() ) {
+-        autosave();
++    {
++        CATA_TURN_PROFILE_SCOPE( "player.body" );
++        debug_hour_timer.print_time();
++        u.update_body();
+     }
+ 
+-    weather.update_weather();
++    {
++        CATA_TURN_PROFILE_SCOPE( "autosave" );
++        // Auto-save if autosave is enabled
++        if( get_option<bool>( "AUTOSAVE" ) &&
++            calendar::once_every( 1_turns * get_option<int>( "AUTOSAVE_TURNS" ) ) &&
++            !u.is_dead_state() ) {
++            autosave();
++        }
++    }
+ 
+-    reset_light_level();
+-    for( int z = -OVERMAP_DEPTH; z <= OVERMAP_HEIGHT; z++ ) {
+-        m.set_lightmap_cache_dirty( z );
++    {
++        CATA_TURN_PROFILE_SCOPE( "weather.update" );
++        weather.update_weather();
+     }
+ 
+-    perhaps_add_random_npc( /* ignore_spawn_timers_and_rates = */ false );
++    {
++        CATA_TURN_PROFILE_SCOPE( "map.light" );
++        reset_light_level();
++        for( int z = -OVERMAP_DEPTH; z <= OVERMAP_HEIGHT; z++ ) {
++            m.set_lightmap_cache_dirty( z );
++        }
++    }
+ 
+-    // process avatar activities (ignoring user input)
+-    while( u.get_moves() > 0 && u.activity ) {
+-        u.activity.do_turn( u );
++    {
++        CATA_TURN_PROFILE_SCOPE( "npcs.spawn" );
++        perhaps_add_random_npc( /* ignore_spawn_timers_and_rates = */ false );
+     }
+ 
+-    // Process NPC sound events before they move or they hear themselves talking
+-    for( npc &guy : all_npcs() ) {
+-        if( rl_dist( guy.pos_bub(), u.pos_bub() ) < MAX_VIEW_DISTANCE ) {
+-            sounds::process_sound_markers( &guy );
++    {
++        CATA_TURN_PROFILE_SCOPE( "player.activity" );
++        // process avatar activities (ignoring user input)
++        while( u.get_moves() > 0 && u.activity ) {
++            u.activity.do_turn( u );
+         }
+     }
+ 
+-    music::deactivate_music_id( music::music_id::sound );
++    {
++        CATA_TURN_PROFILE_SCOPE( "sounds.markers" );
++        // Process NPC sound events before they move or they hear themselves
++        // talking
++        for( npc &guy : all_npcs() ) {
++            if( rl_dist( guy.pos_bub(), u.pos_bub() ) < MAX_VIEW_DISTANCE ) {
++                sounds::process_sound_markers( &guy );
++            }
++        }
++
++        music::deactivate_music_id( music::music_id::sound );
+ 
+-    // Process sound events into sound markers for display to the player.
+-    sounds::process_sound_markers( &u );
++        // Process sound events into sound markers for display to the player.
++        sounds::process_sound_markers( &u );
+ 
+-    if( u.is_deaf() ) {
+-        sfx::do_hearing_loss();
++        if( u.is_deaf() ) {
++            sfx::do_hearing_loss();
++        }
+     }
+ 
+-    // avatar processes human input through handle_action()
+-    if( !u.has_effect( effect_sleep ) || uquit == QUIT_WATCH ) {
+-        if( u.get_moves() > 0 || uquit == QUIT_WATCH ) {
+-            while( u.get_moves() > 0 || uquit == QUIT_WATCH ) {
++    {
++        CATA_TURN_PROFILE_SCOPE( "player.input" );
++        // avatar processes human input through handle_action()
++        if( !u.has_effect( effect_sleep ) || uquit == QUIT_WATCH ) {
++            if( u.get_moves() > 0 || uquit == QUIT_WATCH ) {
++                while( u.get_moves() > 0 || uquit == QUIT_WATCH ) {
+ 
+-                // handle_action() may cause map updates, creatures to die
+-                m.process_falling();
+-                cleanup_dead();
++                    // handle_action() may cause map updates, creatures to die
++                    m.process_falling();
++                    cleanup_dead();
+ 
+-                mon_info_update();
+-                // Process any new sounds the player caused during their turn.
+-                for( npc &guy : all_npcs() ) {
+-                    if( rl_dist( guy.pos_bub(), u.pos_bub() ) < MAX_VIEW_DISTANCE ) {
+-                        sounds::process_sound_markers( &guy );
++                    mon_info_update();
++                    // Process any new sounds the player caused during their turn.
++                    for( npc &guy : all_npcs() ) {
++                        if( rl_dist( guy.pos_bub(), u.pos_bub() ) < MAX_VIEW_DISTANCE ) {
++                            sounds::process_sound_markers( &guy );
++                        }
++                    }
++                    explosion_handler::process_explosions();
++                    sounds::process_sound_markers( &u );
++                    if( !u.activity && uquit != QUIT_WATCH &&
++                        ( !u.has_distant_destination() ||
++                          calendar::once_every( 10_seconds ) ) ) {
++                        wait_popup_reset();
++                        ui_manager::redraw();
+                     }
+-                }
+-                explosion_handler::process_explosions();
+-                sounds::process_sound_markers( &u );
+-                if( !u.activity && uquit != QUIT_WATCH
+-                    && ( !u.has_distant_destination() || calendar::once_every( 10_seconds ) ) ) {
+-                    wait_popup_reset();
+-                    ui_manager::redraw();
+-                }
+ 
+-                if( queue_screenshot ) {
+-                    take_screenshot();
+-                    queue_screenshot = false;
+-                }
++                    if( queue_screenshot ) {
++                        take_screenshot();
++                        queue_screenshot = false;
++                    }
+ 
+-                if( handle_action() ) {
+-                    ++moves_since_last_save;
+-                    u.action_taken();
+-                }
++                    if( handle_action() ) {
++                        ++moves_since_last_save;
++                        u.action_taken();
++                    }
+ 
+-                if( is_game_over() ) {
+-                    return turn_handler::cleanup_at_end();
+-                }
++                    if( is_game_over() ) {
++                        return turn_handler::cleanup_at_end();
++                    }
+ 
+-                if( uquit == QUIT_WATCH ) {
+-                    break;
+-                }
++                    if( uquit == QUIT_WATCH ) {
++                        break;
++                    }
+ 
+-                // avatar processes moves for activities started by handle_action()
+-                while( u.get_moves() > 0 && u.activity ) {
+-                    u.activity.do_turn( u );
++                    // avatar processes moves for activities started by handle_action()
++                    while( u.get_moves() > 0 && u.activity ) {
++                        u.activity.do_turn( u );
++                    }
++                }
++                // Reset displayed sound markers now that the turn is over.
++                // We only want this to happen if the player had a chance to examine
++                // the sounds.
++                sounds::reset_markers();
++            } else {
++                // Rate limit key polling to 10 times a second.
++                static auto start =
++                    std::chrono::time_point_cast<std::chrono::milliseconds>(
++                        std::chrono::steady_clock::now() );
++                const auto now =
++                    std::chrono::time_point_cast<std::chrono::milliseconds>(
++                        std::chrono::steady_clock::now() );
++                if( ( now - start ).count() > 100 ) {
++                    handle_key_blocking_activity();
++                    start = now;
+                 }
+-            }
+-            // Reset displayed sound markers now that the turn is over.
+-            // We only want this to happen if the player had a chance to examine the sounds.
+-            sounds::reset_markers();
+-        } else {
+-            // Rate limit key polling to 10 times a second.
+-            static auto start = std::chrono::time_point_cast<std::chrono::milliseconds>(
+-                                    std::chrono::steady_clock::now() );
+-            const auto now = std::chrono::time_point_cast<std::chrono::milliseconds>(
+-                                 std::chrono::steady_clock::now() );
+-            if( ( now - start ).count() > 100 ) {
+-                handle_key_blocking_activity();
+-                start = now;
+-            }
+ 
+-            mon_info_update();
++                mon_info_update();
+ 
+-            // If player is performing a task, a monster is dangerously close,
+-            // and monster can reach to the player or it has some sort of a ranged attack,
+-            // warn them regardless of previous safemode warnings
+-            if( u.activity ) {
+-                for( std::pair<const distraction_type, std::string> &dist : u.activity.get_distractions() ) {
+-                    if( cancel_activity_or_ignore_query( dist.first, dist.second ) ) {
+-                        break;
++                // If player is performing a task, a monster is dangerously close,
++                // and monster can reach to the player or it has some sort of a ranged
++                // attack, warn them regardless of previous safemode warnings
++                if( u.activity ) {
++                    for( std::pair<const distraction_type, std::string> &dist :
++                         u.activity.get_distractions() ) {
++                        if( cancel_activity_or_ignore_query( dist.first, dist.second ) ) {
++                            break;
++                        }
+                     }
+                 }
+             }
+         }
+     }
+ 
+-    if( driving_view_offset.x() != 0 || driving_view_offset.y() != 0 ) {
+-        // Still have a view offset, but might not be driving anymore,
+-        // or the option has been deactivated,
+-        // might also happen when someone dives from a moving car.
+-        // or when using the handbrake.
+-        vehicle *veh = veh_pointer_or_null( m.veh_at( u.pos_bub() ) );
+-        calc_driving_offset( veh );
++    {
++        CATA_TURN_PROFILE_SCOPE( "vehicles.view" );
++        if( driving_view_offset.x() != 0 || driving_view_offset.y() != 0 ) {
++            // Still have a view offset, but might not be driving anymore,
++            // or the option has been deactivated,
++            // might also happen when someone dives from a moving car.
++            // or when using the handbrake.
++            vehicle *veh = veh_pointer_or_null( m.veh_at( u.pos_bub() ) );
++            calc_driving_offset( veh );
++        }
+     }
+ 
+-    scent_map &scent = get_scent();
+-    // No-scent debug mutation has to be processed here or else it takes time to start working
+-    if( !u.has_flag( json_flag_NO_SCENT ) ) {
+-        scent.set( u.pos_bub(), u.scent, u.get_type_of_scent() );
+-        overmap_buffer.set_scent( u.pos_abs_omt(),  u.scent );
++    {
++        CATA_TURN_PROFILE_SCOPE( "scent" );
++        scent_map &scent = get_scent();
++        // No-scent debug mutation has to be processed here or else it takes time
++        // to start working
++        if( !u.has_flag( json_flag_NO_SCENT ) ) {
++            scent.set( u.pos_bub(), u.scent, u.get_type_of_scent() );
++            overmap_buffer.set_scent( u.pos_abs_omt(), u.scent );
++        }
++        scent.update( u.pos_bub(), m );
+     }
+-    scent.update( u.pos_bub(), m );
+ 
+-    // We need floor cache before checking falling 'n stuff
+-    m.build_floor_caches();
++    {
++        CATA_TURN_PROFILE_SCOPE( "map.floor" );
++        // We need floor cache before checking falling 'n stuff
++        m.build_floor_caches();
++        m.process_falling();
++    }
+ 
+-    m.process_falling();
+-    m.vehmove();
+-    m.process_fields();
+-    m.process_items();
+-    explosion_handler::process_explosions();
+-    m.creature_in_field( u );
++    {
++        CATA_TURN_PROFILE_SCOPE( "map.vehicles" );
++        m.vehmove();
++    }
++    {
++        CATA_TURN_PROFILE_SCOPE( "map.fields" );
++        m.process_fields();
++    }
++    {
++        CATA_TURN_PROFILE_SCOPE( "map.items" );
++        m.process_items();
++    }
++    {
++        CATA_TURN_PROFILE_SCOPE( "map.explosions" );
++        explosion_handler::process_explosions();
++    }
++    {
++        CATA_TURN_PROFILE_SCOPE( "map.creature_fields" );
++        m.creature_in_field( u );
++    }
+ 
+-    // Apply sounds from previous turn to monster and NPC AI.
+-    sounds::process_sounds();
++    {
++        CATA_TURN_PROFILE_SCOPE( "sounds.ai" );
++        // Apply sounds from previous turn to monster and NPC AI.
++        sounds::process_sounds();
++    }
+     const int levz = m.get_abs_sub().z();
+-    // Update vision caches for monsters. If this turns out to be expensive,
+-    // consider a stripped down cache just for monsters.
+-    m.build_map_cache( levz, true );
++    {
++        CATA_TURN_PROFILE_SCOPE( "map.visibility" );
++        // Update vision caches for monsters. If this turns out to be expensive,
++        // consider a stripped down cache just for monsters.
++        m.build_map_cache( levz, true );
++    }
+ 
+-    // process monster and npc turn
+-    monmove();
++    {
++        CATA_TURN_PROFILE_SCOPE( "creatures" );
++        // process monster and npc turn
++        monmove();
++    }
+ 
+-    if( calendar::once_every( time_between_npc_OM_moves ) ) {
+-        overmap_npc_move();
++    {
++        CATA_TURN_PROFILE_SCOPE( "overmap.npcs" );
++        if( calendar::once_every( time_between_npc_OM_moves ) ) {
++            overmap_npc_move();
++        }
+     }
+-    m.furniture_terrain_emit_fields();
+-    // required after monsters move and fields emit
+-    mon_info_update();
+ 
+-    // replenish avatar moves
+-    u.process_turn();
++    {
++        CATA_TURN_PROFILE_SCOPE( "map.emissions" );
++        m.furniture_terrain_emit_fields();
++        // required after monsters move and fields emit
++        mon_info_update();
++    }
+ 
+-    if( u.get_moves() < 0 && get_option<bool>( "FORCE_REDRAW" ) ) {
+-        ui_manager::redraw();
+-        refresh_display();
++    {
++        CATA_TURN_PROFILE_SCOPE( "player.replenish" );
++        // replenish avatar moves
++        u.process_turn();
++    }
++
++    {
++        CATA_TURN_PROFILE_SCOPE( "render" );
++        if( u.get_moves() < 0 && get_option<bool>( "FORCE_REDRAW" ) ) {
++            ui_manager::redraw();
++            refresh_display();
++        }
+     }
+ 
+-    if( levz >= 0 && !u.is_underwater() ) {
+-        handle_weather_effects( weather.weather_id );
++    {
++        CATA_TURN_PROFILE_SCOPE( "weather.effects" );
++        if( levz >= 0 && !u.is_underwater() ) {
++            handle_weather_effects( weather.weather_id );
++        }
+     }
+ 
+-    handle_progress_ui();
++    {
++        CATA_TURN_PROFILE_SCOPE( "ui.progress" );
++        handle_progress_ui();
++    }
+ 
+-    m.invalidate_visibility_cache();
++    {
++        CATA_TURN_PROFILE_SCOPE( "map.visibility_invalidate" );
++        m.invalidate_visibility_cache();
++    }
+ 
+-    u.update_bodytemp();
+-    u.update_body_wetness( *weather.weather_precise );
+-    u.apply_wetness_morale( weather.temperature );
++    {
++        CATA_TURN_PROFILE_SCOPE( "player.temperature" );
++        u.update_bodytemp();
++        u.update_body_wetness( *weather.weather_precise );
++        u.apply_wetness_morale( weather.temperature );
++    }
+ 
+-    if( calendar::once_every( 1_minutes ) ) {
+-        u.update_morale();
+-        for( npc &guy : all_npcs() ) {
+-            guy.update_morale();
+-            guy.check_and_recover_morale();
++    {
++        CATA_TURN_PROFILE_SCOPE( "player.morale" );
++        if( calendar::once_every( 1_minutes ) ) {
++            u.update_morale();
++            for( npc &guy : all_npcs() ) {
++                guy.update_morale();
++                guy.check_and_recover_morale();
++            }
+         }
+-    }
+ 
+-    if( calendar::once_every( 9_turns ) ) {
+-        u.check_and_recover_morale();
++        if( calendar::once_every( 9_turns ) ) {
++            u.check_and_recover_morale();
++        }
+     }
+ 
+-    if( !u.is_deaf() ) {
+-        sfx::remove_hearing_loss();
++    {
++        CATA_TURN_PROFILE_SCOPE( "sounds.effects" );
++        if( !u.is_deaf() ) {
++            sfx::remove_hearing_loss();
++        }
++        sfx::do_danger_music();
++        sfx::do_vehicle_engine_sfx();
++        sfx::do_vehicle_exterior_engine_sfx();
++        sfx::do_low_stamina_sfx();
+     }
+-    sfx::do_danger_music();
+-    sfx::do_vehicle_engine_sfx();
+-    sfx::do_vehicle_exterior_engine_sfx();
+-    sfx::do_low_stamina_sfx();
+ 
+-    // reset player noise
+-    u.volume = 0;
++    {
++        CATA_TURN_PROFILE_SCOPE( "player.finalize" );
++        // reset player noise
++        u.volume = 0;
+ 
+-    // Calculate bionic power balance
+-    u.power_balance = u.get_power_level() - u.power_prev_turn;
+-    u.power_prev_turn = u.get_power_level();
++        // Calculate bionic power balance
++        u.power_balance = u.get_power_level() - u.power_prev_turn;
++        u.power_prev_turn = u.get_power_level();
++    }
+ 
+ #if defined(EMSCRIPTEN)
+     // This will cause a prompt to be shown if the window is closed, until the
+@@ -800,6 +913,9 @@ bool game::do_turn()
+     EM_ASM( window.game_unsaved = true; );
+ #endif
+ 
+-    debug_menu::debug_capture::tick_if_active();
++    {
++        CATA_TURN_PROFILE_SCOPE( "debug.capture" );
++        debug_menu::debug_capture::tick_if_active();
++    }
+     return false;
+ }
+diff --git a/src/main.cpp b/src/main.cpp
+index 187b87333f6..4e2521b80c5 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -15,10 +15,13 @@
+ #include <cstring>
+ #include <ctime>
+ #include <exception>
++#include <filesystem>
+ #include <functional>
+ #include <iostream>
++#include <limits>
+ #include <map>
+ #include <memory>
++#include <stdexcept>
+ #include <string>
+ #include <utility>
+ #include <vector>
+@@ -31,8 +34,11 @@
+ 
+ #include <flatbuffers/util.h>
+ 
++#include "avatar.h"
+ #include "cached_options.h"
++#include "calendar.h"
+ #include "cata_allocator.h"
++#include "cata_imgui.h"
+ #include "cata_path.h"
+ #include "color.h"
+ #include "compatibility.h"
+@@ -61,7 +67,13 @@
+ #include "translations.h"
+ #include "type_id.h"
+ #include "ui_manager.h"
+-#include "cata_imgui.h"
++#include "worldfactory.h"
++#if defined(CATA_ENABLE_TURN_PROFILER)
++#include "turn_profiler.h"
++#if defined(_MSC_VER)
++#include <intrin.h>
++#endif
++#endif
+ #if defined(MACOSX) || defined(__CYGWIN__)
+ #   include <unistd.h> // getpid()
+ #endif
+@@ -280,6 +292,12 @@ struct cli_opts {
+     std::vector<std::string> opts;
+     std::string world; /** if set try to load first save in this world on startup */
+     bool disable_ascii_art = false;
++#if defined(CATA_ENABLE_TURN_PROFILER)
++    std::size_t turn_profile_turns = 0;
++    std::string turn_profile_output = "turn-profile-results";
++    std::string turn_profile_executable_sha256;
++    std::string turn_profile_seed_label;
++#endif
+ };
+ 
+ cli_opts parse_commandline( int argc, const char **argv )
+@@ -290,7 +308,7 @@ cli_opts parse_commandline( int argc, const char **argv )
+     constexpr std::string_view section_map_sharing = "Map sharing";
+     constexpr std::string_view section_user_directory = "User directories";
+     constexpr std::string_view section_accessibility = "Accessibility";
+-    const std::vector<arg_handler> first_pass_arguments = {{
++    std::vector<arg_handler> first_pass_arguments = {{
+             {
+                 "--seed", "<string of letters and or numbers>",
+                 "Sets the random number generator's seed value",
+@@ -437,6 +455,54 @@ cli_opts parse_commandline( int argc, const char **argv )
+         }
+     };
+ 
++#if defined(CATA_ENABLE_TURN_PROFILER)
++    first_pass_arguments.insert( first_pass_arguments.begin() + 1, {
++        {
++            "--turn-profile", "<turn count>",
++            "Create an isolated game and profile the requested simulation turns",
++            section_default, 1,
++            [&result]( int, const char **params ) -> int {
++                char *end = nullptr;
++                const unsigned long long turns = std::strtoull( params[0], &end, 10 );
++                if( end == params[0] || *end != '\0' || turns == 0 ||
++                    turns > std::numeric_limits<std::size_t>::max() )
++                {
++                    return -1;
++                }
++                result.turn_profile_turns = static_cast<std::size_t>( turns );
++                return 1;
++            }
++        },
++        {
++            "--turn-profile-output", "<directory>",
++            "Write turn-profile.json and turn-profile.html to this directory",
++            section_default, 1,
++            [&result]( int, const char **params ) -> int {
++                result.turn_profile_output = params[0];
++                return 1;
++            }
++        },
++        {
++            "--turn-profile-executable-sha256", "<hash>",
++            "Record the executable SHA-256 supplied by the launcher",
++            section_default, 1,
++            [&result]( int, const char **params ) -> int {
++                result.turn_profile_executable_sha256 = params[0];
++                return 1;
++            }
++        },
++        {
++            "--turn-profile-seed-label", "<seed>",
++            "Record the deterministic seed label supplied by the launcher",
++            section_default, 1,
++            [&result]( int, const char **params ) -> int {
++                result.turn_profile_seed_label = params[0];
++                return 1;
++            }
++        }
++    } );
++#endif
++
+     // The following arguments are dependent on one or more of the previous flags and are run
+     // in a second pass.
+     const std::vector<arg_handler> second_pass_arguments = {{
+@@ -553,6 +619,132 @@ cli_opts parse_commandline( int argc, const char **argv )
+     return result;
+ }
+ 
++#if defined(CATA_ENABLE_TURN_PROFILER)
++
++std::string profiler_cpu_model()
++{
++#if defined(_MSC_VER)
++    std::array<int, 4> registers {};
++    __cpuid( registers.data(), 0x80000000 );
++    if( static_cast<unsigned int>( registers[0] ) < 0x80000004 ) {
++        return "unknown";
++    }
++    std::array<int, 12> brand_registers{};
++    __cpuid( brand_registers.data(), 0x80000002 );
++    __cpuid( brand_registers.data() + 4, 0x80000003 );
++    __cpuid( brand_registers.data() + 8, 0x80000004 );
++    std::array<char, 49> brand{};
++    std::memcpy( brand.data(), brand_registers.data(), 48 );
++    std::string result( brand.data() );
++    const std::size_t first = result.find_first_not_of( ' ' );
++    return first == std::string::npos ? "unknown" : result.substr( first );
++#else
++    return "unknown";
++#endif
++}
++
++std::string profiler_windows_version()
++{
++#if defined(_WIN32)
++    using rtl_get_version = LONG( WINAPI * )( OSVERSIONINFOW * );
++    const HMODULE ntdll = GetModuleHandleW( L"ntdll.dll" );
++    if( ntdll == nullptr ) {
++        return "unknown";
++    }
++    const auto get_version = reinterpret_cast<rtl_get_version>(
++                                 GetProcAddress( ntdll, "RtlGetVersion" ) );
++    if( get_version == nullptr ) {
++        return "unknown";
++    }
++    OSVERSIONINFOW version {};
++    version.dwOSVersionInfoSize = sizeof( version );
++    if( get_version( &version ) != 0 ) {
++        return "unknown";
++    }
++    return std::to_string( version.dwMajorVersion ) + "." +
++           std::to_string( version.dwMinorVersion ) + "." +
++           std::to_string( version.dwBuildNumber );
++#else
++    return "unsupported";
++#endif
++}
++
++std::string profiler_compiler()
++{
++#if defined(_MSC_FULL_VER)
++    return "MSVC " + std::to_string( _MSC_FULL_VER );
++#else
++    return "unknown";
++#endif
++}
++
++std::string profiler_build_options()
++{
++    std::string result = "TURN_PROFILING=ON";
++#if defined(TILES)
++    result += ";TILES=ON";
++#else
++    result += ";TILES=OFF";
++#endif
++#if defined(SDL_SOUND)
++    result += ";SOUND=ON";
++#else
++    result += ";SOUND=OFF";
++#endif
++    result += ";AUTOSAVE=OFF";
++    return result;
++}
++
++int run_turn_profile( const cli_opts &cli )
++{
++    get_options().get_option( "AUTOSAVE" ).setValue( "false" );
++    turn_profiler::start( cli.turn_profile_turns );
++    main_menu menu;
++    if( !menu.opening_screen() ) {
++        throw std::runtime_error(
++            "turn profiler could not create and start its game" );
++    }
++    avatar &player = get_avatar();
++    get_event_bus().send<event_type::game_begin>( getVersionString() );
++    bool game_ended = false;
++    for( std::size_t index = 0; index < cli.turn_profile_turns; ++index ) {
++        player.set_moves( 0 );
++        const std::int64_t game_turn =
++            to_turns<std::int64_t>( calendar::turn - calendar::turn_zero );
++        turn_profiler::begin_turn( game_turn );
++        game_ended = g->do_turn();
++        turn_profiler::end_turn();
++        if( game_ended ) {
++            break;
++        }
++        if( ( index + 1 ) % 1'000 == 0 ) {
++            std::cout << "Profiled " << index + 1 << " / " << cli.turn_profile_turns
++                      << " turns\n";
++        }
++    }
++
++    turn_profiler::run_metadata metadata;
++    metadata.seed = cli.turn_profile_seed_label.empty()
++                    ? std::to_string( cli.seed )
++                    : cli.turn_profile_seed_label;
++    metadata.git_version = getVersionString();
++    metadata.compiler = profiler_compiler();
++    metadata.build_options = profiler_build_options();
++    metadata.cpu_model = profiler_cpu_model();
++    metadata.windows_version = profiler_windows_version();
++    metadata.executable_sha256 = cli.turn_profile_executable_sha256;
++    turn_profiler::write_output_files(
++        std::filesystem::u8path( cli.turn_profile_output ), metadata );
++
++    const std::size_t completed = turn_profiler::samples().size();
++    turn_profiler::stop();
++    std::cout << "Turn profile written to " << cli.turn_profile_output << " ("
++              << completed << " turns)\n";
++    return game_ended || completed != cli.turn_profile_turns ? 2 : 0;
++}
++
++#endif
++
+ bool assure_essential_dirs_exist()
+ {
+     using namespace PATH_INFO;
+@@ -864,6 +1056,24 @@ int main( int argc, const char *argv[] )
+ #endif
+     replay_buffered_debugmsg_prompts();
+ 
++#if defined(CATA_ENABLE_TURN_PROFILER)
++    if( cli.turn_profile_turns != 0 ) {
++        try {
++            const int result = run_turn_profile( cli );
++            deinitDebug();
++            g.reset();
++            catacurses::endwin();
++            return result;
++        } catch( const std::exception &error ) {
++            std::cerr << "Turn profiler failed: " << error.what() << '\n';
++            deinitDebug();
++            g.reset();
++            catacurses::endwin();
++            return 1;
++        }
++    }
++#endif
++
+     main_menu::queued_world_to_load = std::move( cli.world );
+ 
+     while( true ) {
+diff --git a/src/main_menu.cpp b/src/main_menu.cpp
+index 909d572d2cc..ffd4b791af7 100644
+--- a/src/main_menu.cpp
++++ b/src/main_menu.cpp
+@@ -55,6 +55,10 @@
+ #include "text_snippets.h"
+ #include "translation.h"
+ #include "translations.h"
++#if defined(CATA_ENABLE_TURN_PROFILER)
++#include "turn_profile_character.h"
++#include "turn_profiler.h"
++#endif
+ #include "type_id.h"
+ #include "uilist.h"
+ #include "ui_manager.h"
+@@ -594,6 +598,31 @@ bool main_menu::opening_screen()
+ 
+     init_strings();
+ 
++#if defined(CATA_ENABLE_TURN_PROFILER)
++    if( turn_profiler::is_active() ) {
++        avatar &player_character = get_avatar();
++        player_character = avatar();
++        on_out_of_scope cleanup( [&player_character]() {
++            player_character = avatar();
++            world_generator->set_active_world( nullptr );
++        } );
++        g->gamemode = nullptr;
++        WORLD *world = world_generator->pick_world( false, true );
++        if( world == nullptr ) {
++            return false;
++        }
++        world_generator->set_active_world( world );
++        g->setup();
++        create_turn_profile_character( player_character );
++        player_character.set_mutation( trait_id( "DEBUG_NODMG" ) );
++        if( !g->start_game() ) {
++            return false;
++        }
++        cleanup.cancel();
++        return true;
++    }
++#endif
++
+     load_char_templates();
+ 
+     ctxt.register_cardinal();
+diff --git a/src/newcharacter.cpp b/src/newcharacter.cpp
+index b9db009958b..b5f2abb2a7a 100644
+--- a/src/newcharacter.cpp
++++ b/src/newcharacter.cpp
+@@ -76,9 +76,10 @@
+ #include "trait_group.h"
+ #include "translation.h"
+ #include "translations.h"
++#include "turn_profile_character.h"
+ #include "type_id.h"
+-#include "uilist.h"
+ #include "ui_manager.h"
++#include "uilist.h"
+ #include "units_utility.h"
+ #include "veh_type.h"
+ #include "worldfactory.h"
+@@ -747,6 +748,29 @@ void Character::add_random_hobby( std::vector<profession_id> &choices )
+     }
+ }
+ 
++#if defined(CATA_ENABLE_TURN_PROFILER)
++void create_turn_profile_character( avatar &player )
++{
++    player = avatar();
++    player.prof = profession::generic();
++    set_scenario( scenario::generic() );
++    player.name = "Turn Profiler";
++    player.male = true;
++    outfit = true;
++    player.set_str_base( 8 );
++    player.set_dex_base( 8 );
++    player.set_int_base( 8 );
++    player.set_per_base( 8 );
++    player.init_age = 25;
++    player.randomize_height();
++    player.randomize_blood();
++    player.randomize_heartrate();
++    player.add_default_background();
++    player.set_body();
++    player.initialize( character_type::NOW );
++}
++#endif
++
+ bool avatar::create( character_type type, const std::string &tempname )
+ {
+     loading_ui::done();
+diff --git a/src/turn_profile_character.h b/src/turn_profile_character.h
+new file mode 100644
+index 00000000000..6faabcb3eb8
+--- /dev/null
++++ b/src/turn_profile_character.h
+@@ -0,0 +1,13 @@
++#pragma once
++#ifndef CATA_SRC_TURN_PROFILE_CHARACTER_H
++#define CATA_SRC_TURN_PROFILE_CHARACTER_H
++
++#if defined(CATA_ENABLE_TURN_PROFILER)
++
++class avatar;
++
++void create_turn_profile_character( avatar &player );
++
++#endif
++
++#endif // CATA_SRC_TURN_PROFILE_CHARACTER_H
+diff --git a/src/turn_profiler.cpp b/src/turn_profiler.cpp
+new file mode 100644
+index 00000000000..a21c81c90d5
+--- /dev/null
++++ b/src/turn_profiler.cpp
+@@ -0,0 +1,518 @@
++#include "turn_profiler.h"
++
++#if defined(CATA_ENABLE_TURN_PROFILER)
++
++#include <algorithm>
++#include <chrono>
++#include <fstream>
++#include <iomanip>
++#include <locale>
++#include <memory>
++#include <set>
++#include <sstream>
++#include <stdexcept>
++#include <utility>
++
++#if defined(_WIN32)
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#endif
++
++namespace turn_profiler
++{
++
++std::uint64_t read_process_cycles()
++{
++#if defined(_WIN32)
++    ULONG64 cycles = 0;
++    if( QueryProcessCycleTime( GetCurrentProcess(), &cycles ) == 0 ) {
++        throw std::runtime_error( "QueryProcessCycleTime failed" );
++    }
++    return cycles;
++#else
++    throw std::runtime_error( "turn profiling is supported only on Windows" );
++#endif
++}
++
++std::uint64_t read_thread_cycles()
++{
++#if defined(_WIN32)
++    ULONG64 cycles = 0;
++    if( QueryThreadCycleTime( GetCurrentThread(), &cycles ) == 0 ) {
++        throw std::runtime_error( "QueryThreadCycleTime failed" );
++    }
++    return cycles;
++#else
++    throw std::runtime_error( "turn profiling is supported only on Windows" );
++#endif
++}
++
++std::uint64_t derive_background_cycles( const std::uint64_t process_start,
++                                        const std::uint64_t process_end,
++                                        const std::uint64_t primary_thread_start,
++                                        const std::uint64_t primary_thread_end )
++{
++    if( process_end < process_start || primary_thread_end < primary_thread_start ) {
++        return 0;
++    }
++    const std::uint64_t process_cycles = process_end - process_start;
++    const std::uint64_t primary_thread_cycles =
++        primary_thread_end - primary_thread_start;
++    return process_cycles > primary_thread_cycles
++           ? process_cycles - primary_thread_cycles
++           : 0;
++}
++
++namespace
++{
++
++std::unique_ptr<recorder> native_recorder;
++bool native_turn_is_open = false;
++
++std::uint64_t wall_microseconds()
++{
++    return static_cast<std::uint64_t>(
++               std::chrono::duration_cast<std::chrono::microseconds>(
++                   std::chrono::steady_clock::now().time_since_epoch() )
++               .count() );
++}
++
++} // namespace
++
++scoped_region::scoped_region( const std::string_view id )
++{
++    if( native_recorder && native_turn_is_open ) {
++        native_recorder->enter_region( id, read_thread_cycles() );
++        armed = true;
++    }
++}
++
++scoped_region::~scoped_region()
++{
++    if( armed && native_recorder && native_turn_is_open ) {
++        try {
++            native_recorder->leave_region( read_thread_cycles() );
++        } catch( ... ) {
++            std::terminate();
++        }
++    }
++}
++
++void start( const std::size_t target_turns )
++{
++    native_recorder = std::make_unique<recorder>( target_turns );
++    native_turn_is_open = false;
++}
++
++void stop()
++{
++    native_recorder.reset();
++    native_turn_is_open = false;
++}
++
++void begin_turn( const std::int64_t game_turn )
++{
++    if( !native_recorder ) {
++        throw std::logic_error( "turn profiler is not active" );
++    }
++    const std::uint64_t process_cycles = read_process_cycles();
++    const std::uint64_t profiler_start = read_thread_cycles();
++    native_recorder->begin_turn( game_turn, process_cycles, profiler_start,
++                                 wall_microseconds() );
++    const std::uint64_t profiler_end = read_thread_cycles();
++    if( profiler_end >= profiler_start ) {
++        native_recorder->add_component_cycles( "profiler",
++                                               profiler_end - profiler_start );
++    }
++    native_turn_is_open = true;
++}
++
++void end_turn()
++{
++    if( !native_recorder || !native_turn_is_open ) {
++        throw std::logic_error( "turn profiler has no active turn" );
++    }
++    const std::uint64_t profiler_start = read_thread_cycles();
++    const std::uint64_t profiler_end = read_thread_cycles();
++    if( profiler_end >= profiler_start ) {
++        native_recorder->add_component_cycles( "profiler",
++                                               profiler_end - profiler_start );
++    }
++    native_recorder->end_turn( read_process_cycles(), profiler_end,
++                               wall_microseconds() );
++    native_turn_is_open = false;
++}
++
++bool is_active()
++{
++    return native_recorder != nullptr;
++}
++
++bool is_complete()
++{
++    return native_recorder &&
++           native_recorder->samples().size() >= native_recorder->target_turns();
++}
++
++const std::vector<turn_sample> &samples()
++{
++    if( !native_recorder ) {
++        throw std::logic_error( "turn profiler is not active" );
++    }
++    return native_recorder->samples();
++}
++
++recorder::recorder( const std::size_t target_turns )
++    : target_turn_count( target_turns )
++{
++    completed_samples.reserve( target_turns );
++}
++
++void recorder::begin_turn( const std::int64_t game_turn,
++                           const std::uint64_t process_cycles,
++                           const std::uint64_t primary_thread_cycles,
++                           const std::uint64_t wall_microseconds )
++{
++    if( turn_is_open ) {
++        throw std::logic_error(
++            "turn profiler began a turn while another turn was open" );
++    }
++    current_game_turn = game_turn;
++    turn_start_cycles = process_cycles;
++    turn_start_primary_thread_cycles = primary_thread_cycles;
++    turn_start_wall_microseconds = wall_microseconds;
++    current_components.clear();
++    region_stack.clear();
++    turn_is_open = true;
++}
++
++void recorder::enter_region( const std::string_view id,
++                             const std::uint64_t thread_cycles )
++{
++    if( !turn_is_open ) {
++        throw std::logic_error( "turn profiler entered a region outside a turn" );
++    }
++    region_stack.push_back( {std::string( id ), thread_cycles, 0} );
++}
++
++void recorder::leave_region( const std::uint64_t thread_cycles )
++{
++    if( region_stack.empty() ) {
++        throw std::logic_error( "turn profiler left a region with an empty stack" );
++    }
++
++    const open_region region = std::move( region_stack.back() );
++    region_stack.pop_back();
++    const std::uint64_t inclusive = thread_cycles >= region.start_cycles
++                                    ? thread_cycles - region.start_cycles
++                                    : 0;
++    const std::uint64_t exclusive =
++        inclusive >= region.child_cycles ? inclusive - region.child_cycles : 0;
++    component_sample &sample = current_components[region.id];
++    sample.inclusive_cycles += inclusive;
++    sample.exclusive_cycles += exclusive;
++    if( !region_stack.empty() ) {
++        region_stack.back().child_cycles += inclusive;
++    }
++}
++
++void recorder::add_component_cycles( const std::string_view id,
++                                     const std::uint64_t cycles )
++{
++    if( !turn_is_open ) {
++        throw std::logic_error(
++            "turn profiler added component cycles outside a turn" );
++    }
++    component_sample &sample = current_components[std::string( id )];
++    sample.inclusive_cycles += cycles;
++    sample.exclusive_cycles += cycles;
++}
++
++turn_sample recorder::end_turn( const std::uint64_t process_cycles,
++                                const std::uint64_t primary_thread_cycles,
++                                const std::uint64_t wall_microseconds )
++{
++    if( !turn_is_open ) {
++        throw std::logic_error( "turn profiler ended a turn while no turn was open" );
++    }
++    if( !region_stack.empty() ) {
++        throw std::logic_error( "turn profiler ended a turn with open regions" );
++    }
++
++    turn_sample result;
++    result.game_turn = current_game_turn;
++    result.total_cycles = process_cycles >= turn_start_cycles
++                          ? process_cycles - turn_start_cycles
++                          : 0;
++    result.elapsed_microseconds =
++        wall_microseconds >= turn_start_wall_microseconds
++        ? wall_microseconds - turn_start_wall_microseconds
++        : 0;
++    result.components = std::move( current_components );
++    const std::uint64_t background_cycles = derive_background_cycles(
++            turn_start_cycles, process_cycles, turn_start_primary_thread_cycles,
++            primary_thread_cycles );
++    if( background_cycles > 0 ) {
++        component_sample &background = result.components["background.other"];
++        background.inclusive_cycles += background_cycles;
++        background.exclusive_cycles += background_cycles;
++    }
++
++    std::set<std::string, std::less<>> explicit_ids;
++    std::vector<std::pair<std::string, std::uint64_t>> explicit_inclusive;
++    explicit_inclusive.reserve( result.components.size() );
++    for( const auto &[id, component] : result.components ) {
++        explicit_ids.insert( id );
++        explicit_inclusive.emplace_back( id, component.inclusive_cycles );
++    }
++    for( const auto &[id, inclusive_cycles] : explicit_inclusive ) {
++        std::size_t separator = id.rfind( '.' );
++        while( separator != std::string::npos ) {
++            const std::string parent = id.substr( 0, separator );
++            if( explicit_ids.count( parent ) != 0 ) {
++                break;
++            }
++            result.components[parent].inclusive_cycles += inclusive_cycles;
++            separator = parent.rfind( '.' );
++        }
++    }
++
++    std::uint64_t attributed_cycles = 0;
++    for( const auto &[id, component] : result.components ) {
++        static_cast<void>( id );
++        attributed_cycles += component.exclusive_cycles;
++    }
++    component_sample &unattributed = result.components["unattributed"];
++    if( result.total_cycles > attributed_cycles ) {
++        unattributed.inclusive_cycles = result.total_cycles - attributed_cycles;
++        unattributed.exclusive_cycles = unattributed.inclusive_cycles;
++    }
++
++    completed_samples.push_back( result );
++    turn_is_open = false;
++    return result;
++}
++
++const std::vector<turn_sample> &recorder::samples() const
++{
++    return completed_samples;
++}
++
++std::size_t recorder::target_turns() const
++{
++    return target_turn_count;
++}
++
++namespace
++{
++
++std::string json_escape( const std::string_view value )
++{
++    std::ostringstream result;
++    for( const unsigned char ch : value ) {
++        switch( ch ) {
++            case '"':
++                result << "\\\"";
++                break;
++            case '\\':
++                result << "\\\\";
++                break;
++            case '\b':
++                result << "\\b";
++                break;
++            case '\f':
++                result << "\\f";
++                break;
++            case '\n':
++                result << "\\n";
++                break;
++            case '\r':
++                result << "\\r";
++                break;
++            case '\t':
++                result << "\\t";
++                break;
++            default:
++                if( ch < 0x20 ) {
++                    result << "\\u" << std::hex << std::setw( 4 ) << std::setfill( '0' )
++                           << static_cast<int>( ch ) << std::dec;
++                } else {
++                    result << ch;
++                }
++                break;
++        }
++    }
++    return result.str();
++}
++
++void write_json_string( std::ostream &out, const std::string_view value )
++{
++    out << '"' << json_escape( value ) << '"';
++}
++
++} // namespace
++
++std::string serialize_json( const std::vector<turn_sample> &samples,
++                            const run_metadata &metadata )
++{
++    std::set<std::string, std::less<>> component_ids;
++    for( const turn_sample &turn : samples ) {
++        for( const auto &[id, component] : turn.components ) {
++            static_cast<void>( component );
++            component_ids.insert( id );
++        }
++    }
++
++    std::ostringstream out;
++    out.imbue( std::locale::classic() );
++    out << R"({"schema_version":1,"metadata":{)";
++    const auto member = [&out]( const std::string_view name,
++    const std::string_view value, const bool first ) {
++        if( !first ) {
++            out << ',';
++        }
++        write_json_string( out, name );
++        out << ':';
++        write_json_string( out, value );
++    };
++    member( "seed", metadata.seed, true );
++    member( "git_version", metadata.git_version, false );
++    member( "compiler", metadata.compiler, false );
++    member( "build_options", metadata.build_options, false );
++    member( "cpu_model", metadata.cpu_model, false );
++    member( "windows_version", metadata.windows_version, false );
++    member( "executable_sha256", metadata.executable_sha256, false );
++    out << R"(},"completed_turns":)" << samples.size() << R"(,"components":[)";
++
++    bool first_component = true;
++    for( const std::string &id : component_ids ) {
++        if( !first_component ) {
++            out << ',';
++        }
++        write_json_string( out, id );
++        first_component = false;
++    }
++    out << R"(],"turns":[)";
++
++    for( std::size_t index = 0; index < samples.size(); ++index ) {
++        if( index != 0 ) {
++            out << ',';
++        }
++        const turn_sample &turn = samples[index];
++        out << R"({"index":)" << index << R"(,"game_turn":)" << turn.game_turn
++            << R"(,"total_cycles":)" << turn.total_cycles
++            << R"(,"elapsed_microseconds":)" << turn.elapsed_microseconds
++            << R"(,"components":{)";
++        bool first_turn_component = true;
++        for( const auto &[id, component] : turn.components ) {
++            if( !first_turn_component ) {
++                out << ',';
++            }
++            write_json_string( out, id );
++            out << R"(:{"inclusive_cycles":)" << component.inclusive_cycles
++                << R"(,"exclusive_cycles":)" << component.exclusive_cycles << '}';
++            first_turn_component = false;
++        }
++        out << "}}";
++    }
++    out << "]}";
++    return out.str();
++}
++
++std::string render_html( const std::string_view json )
++{
++    std::string embedded_json;
++    embedded_json.reserve( json.size() );
++    for( const char ch : json ) {
++        if( ch == '<' ) {
++            embedded_json += "\\u003c";
++        } else if( ch == '>' ) {
++            embedded_json += "\\u003e";
++        } else if( ch == '&' ) {
++            embedded_json += "\\u0026";
++        } else {
++            embedded_json += ch;
++        }
++    }
++
++    std::ostringstream out;
++    out << R"HTML(<!doctype html>
++<html lang="en"><head><meta charset="utf-8">
++<meta name="viewport" content="width=device-width,initial-scale=1">
++<title>CDDA turn CPU profile</title>
++<style>
++:root{color-scheme:dark;--bg:#111827;--panel:#1f2937;--line:#374151;--text:#f3f4f6;--muted:#9ca3af}
++*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}
++main{max-width:1500px;margin:auto;padding:24px}h1,h2{margin:.2em 0 .6em}.meta{color:var(--muted)}
++.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:16px;margin-top:18px}
++section{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:16px;overflow:auto}
++canvas{display:block;width:100%;height:320px;background:#0b1220}table{width:100%;border-collapse:collapse}
++th,td{padding:7px;border-bottom:1px solid var(--line);text-align:right}th:first-child,td:first-child{text-align:left}
++select{background:#111827;color:var(--text);border:1px solid var(--line);padding:6px}.legend{display:flex;flex-wrap:wrap;gap:9px;margin-top:8px}
++.swatch{display:inline-block;width:10px;height:10px;margin-right:4px}.detail-row{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)}
++</style></head><body><main><h1>CDDA simulation-turn CPU profile</h1><p class="meta" id="metadata"></p>
++<div class="grid"><section><h2>Per-turn exclusive CPU share</h2><canvas id="stacked-chart"></canvas><div class="legend" id="legend"></div></section>
++<section><h2>Turn/component heatmap</h2><canvas id="heatmap"></canvas></section>
++<section><h2>Summary</h2><table id="summary-table"><thead><tr><th>Component</th><th>Inclusive cycles</th><th>Exclusive cycles</th><th>Mean share</th><th>P99 share</th></tr></thead><tbody></tbody></table></section>
++<section><h2>Slow-turn detail</h2><label>Turn <select id="slow-turn-select"></select></label><div id="slow-turn-detail"></div></section></div>
++<script type="application/json" id="profile-data">)HTML"
++        << embedded_json << R"HTML(</script>
++<script>
++(()=>{
++const data=JSON.parse(document.getElementById('profile-data').textContent);const turns=data.turns;
++const ids=data.components;const colors=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15','#4ade80','#c084fc','#94a3b8','#f97316'];
++const value=(t,id)=>t.components[id]?.exclusive_cycles||0;const inclusiveValue=(t,id)=>t.components[id]?.inclusive_cycles||0;const share=(t,id)=>t.total_cycles?value(t,id)/t.total_cycles:0;const hierarchyDepth=id=>id.split('.').length-1;
++document.getElementById('metadata').textContent=`${data.completed_turns} turns · seed ${data.metadata.seed} · ${data.metadata.git_version} · ${data.metadata.cpu_model}`;
++const totals=ids.map(id=>({id,total:turns.reduce((s,t)=>s+value(t,id),0),inclusive:turns.reduce((s,t)=>s+inclusiveValue(t,id),0),shares:turns.map(t=>share(t,id)).sort((a,b)=>a-b)})).sort((a,b)=>b.total-a.total);
++const active=totals.filter(x=>x.total>0||x.inclusive>0);const topComponents=active.filter(x=>x.total>0).slice(0,11).map(x=>x.id);if(!topComponents.includes('unattributed')&&ids.includes('unattributed'))topComponents.push('unattributed');
++function fit(c){const d=devicePixelRatio||1;c.width=Math.max(1,c.clientWidth*d);c.height=Math.max(1,c.clientHeight*d);return d}
++function stacked(){const c=document.getElementById('stacked-chart'),d=fit(c),x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);if(!turns.length)return;
++const w=c.width,h=c.height,n=Math.min(turns.length,Math.floor(w/d)),step=turns.length/n;for(let col=0;col<n;col++){const t=turns[Math.min(turns.length-1,Math.floor(col*step))];let y=h;topComponents.forEach((id,i)=>{const hh=share(t,id)*h;y-=hh;x.fillStyle=colors[i%colors.length];x.fillRect(col*w/n,y,Math.ceil(w/n)+1,hh)})}}
++function heat(){const c=document.getElementById('heatmap'),d=fit(c),x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);if(!turns.length||!active.length)return;const rows=active.slice(0,24),rh=c.height/rows.length,n=Math.min(turns.length,Math.floor(c.width/d)),step=turns.length/n;
++rows.forEach((r,ri)=>{for(let col=0;col<n;col++){const t=turns[Math.min(turns.length-1,Math.floor(col*step))],v=Math.min(1,share(t,r.id)*4);x.fillStyle=`rgb(${Math.round(255*v)},${Math.round(180*v)},${Math.round(60*(1-v))})`;x.fillRect(col*c.width/n,ri*rh,Math.ceil(c.width/n)+1,Math.ceil(rh))}x.fillStyle='#fff';x.fillText(r.id,4,ri*rh+12*d)})}
++const tbody=document.querySelector('#summary-table tbody');active.forEach(r=>{const mean=r.shares.reduce((a,b)=>a+b,0)/(r.shares.length||1),p99=r.shares[Math.min(r.shares.length-1,Math.floor(r.shares.length*.99))]||0;tbody.insertAdjacentHTML('beforeend',`<tr><td>${r.id}</td><td>${r.inclusive.toLocaleString()}</td><td>${r.total.toLocaleString()}</td><td>${(mean*100).toFixed(2)}%</td><td>${(p99*100).toFixed(2)}%</td></tr>`) });
++document.getElementById('legend').innerHTML=topComponents.map((id,i)=>`<span><i class="swatch" style="background:${colors[i%colors.length]}"></i>${id}</span>`).join('');
++const slow=[...turns].sort((a,b)=>b.total_cycles-a.total_cycles).slice(0,20),sel=document.getElementById('slow-turn-select');slow.forEach(t=>sel.add(new Option(`#${t.index} · ${t.total_cycles.toLocaleString()} cycles`,t.index)));
++function detail(){const t=turns[Number(sel.value)]||turns[0];document.getElementById('slow-turn-detail').innerHTML=!t?'':`<p>${t.total_cycles.toLocaleString()} cycles · ${t.elapsed_microseconds.toLocaleString()} μs</p>`+ids.filter(id=>inclusiveValue(t,id)>0).sort((a,b)=>a.localeCompare(b)).map(id=>`<div class="detail-row"><span title="${id}" style="padding-left:${hierarchyDepth(id)*18}px">${id.split('.').pop()}</span><span>${inclusiveValue(t,id).toLocaleString()} incl / ${value(t,id).toLocaleString()} excl</span><span>${(share(t,id)*100).toFixed(2)}%</span></div>`).join('')}sel.addEventListener('change',detail);detail();stacked();heat();addEventListener('resize',()=>{stacked();heat()});
++})();
++</script></main></body></html>)HTML";
++    return out.str();
++}
++
++void write_output_files( const std::filesystem::path &directory,
++                         const run_metadata &metadata )
++{
++    if( !native_recorder ) {
++        throw std::logic_error( "turn profiler is not active" );
++    }
++    std::filesystem::create_directories( directory );
++    const std::string json = serialize_json( native_recorder->samples(), metadata );
++
++    const std::filesystem::path json_path = directory / "turn-profile.json";
++    std::ofstream json_file( json_path, std::ios::binary | std::ios::trunc );
++    if( !json_file ) {
++        throw std::runtime_error( "failed to open turn-profile.json" );
++    }
++    json_file << json;
++    json_file.close();
++    if( !json_file ) {
++        throw std::runtime_error( "failed to write turn-profile.json" );
++    }
++
++    const std::filesystem::path html_path = directory / "turn-profile.html";
++    std::ofstream html_file( html_path, std::ios::binary | std::ios::trunc );
++    if( !html_file ) {
++        throw std::runtime_error( "failed to open turn-profile.html" );
++    }
++    html_file << render_html( json );
++    html_file.close();
++    if( !html_file ) {
++        throw std::runtime_error( "failed to write turn-profile.html" );
++    }
++}
++
++} // namespace turn_profiler
++
++#endif
+diff --git a/src/turn_profiler.h b/src/turn_profiler.h
+new file mode 100644
+index 00000000000..baba54d8b11
+--- /dev/null
++++ b/src/turn_profiler.h
+@@ -0,0 +1,123 @@
++#pragma once
++#ifndef CATA_SRC_TURN_PROFILER_H
++#define CATA_SRC_TURN_PROFILER_H
++
++#if defined(CATA_ENABLE_TURN_PROFILER)
++
++#include <cstddef>
++#include <cstdint>
++#include <filesystem>
++#include <map>
++#include <string>
++#include <string_view>
++#include <vector>
++
++namespace turn_profiler
++{
++
++struct component_sample {
++    std::uint64_t inclusive_cycles = 0;
++    std::uint64_t exclusive_cycles = 0;
++};
++
++struct turn_sample {
++    std::int64_t game_turn = 0;
++    std::uint64_t total_cycles = 0;
++    std::uint64_t elapsed_microseconds = 0;
++    std::map<std::string, component_sample, std::less<>> components;
++};
++
++struct run_metadata {
++    std::string seed;
++    std::string git_version;
++    std::string compiler;
++    std::string build_options;
++    std::string cpu_model;
++    std::string windows_version;
++    std::string executable_sha256;
++};
++
++class recorder
++{
++    public:
++        explicit recorder( std::size_t target_turns );
++
++        void begin_turn( std::int64_t game_turn, std::uint64_t process_cycles,
++                         std::uint64_t primary_thread_cycles,
++                         std::uint64_t wall_microseconds );
++        void enter_region( std::string_view id, std::uint64_t thread_cycles );
++        void leave_region( std::uint64_t thread_cycles );
++        void add_component_cycles( std::string_view id, std::uint64_t cycles );
++        turn_sample end_turn( std::uint64_t process_cycles,
++                              std::uint64_t primary_thread_cycles,
++                              std::uint64_t wall_microseconds );
++
++        const std::vector<turn_sample> &samples() const;
++        std::size_t target_turns() const;
++
++    private:
++        struct open_region {
++            std::string id;
++            std::uint64_t start_cycles = 0;
++            std::uint64_t child_cycles = 0;
++        };
++
++        std::size_t target_turn_count;
++        std::int64_t current_game_turn = 0;
++        std::uint64_t turn_start_cycles = 0;
++        std::uint64_t turn_start_primary_thread_cycles = 0;
++        std::uint64_t turn_start_wall_microseconds = 0;
++        bool turn_is_open = false;
++        std::map<std::string, component_sample, std::less<>> current_components;
++        std::vector<open_region> region_stack;
++        std::vector<turn_sample> completed_samples;
++};
++
++std::string serialize_json( const std::vector<turn_sample> &samples,
++                            const run_metadata &metadata );
++std::string render_html( std::string_view json );
++void write_output_files( const std::filesystem::path &directory,
++                         const run_metadata &metadata );
++std::uint64_t read_process_cycles();
++std::uint64_t read_thread_cycles();
++std::uint64_t derive_background_cycles( std::uint64_t process_start,
++                                        std::uint64_t process_end,
++                                        std::uint64_t primary_thread_start,
++                                        std::uint64_t primary_thread_end );
++
++class scoped_region
++{
++    public:
++        explicit scoped_region( std::string_view id );
++        ~scoped_region();
++        scoped_region( const scoped_region & ) = delete;
++        scoped_region &operator=( const scoped_region & ) = delete;
++
++    private:
++        bool armed = false;
++};
++
++void start( std::size_t target_turns );
++void stop();
++void begin_turn( std::int64_t game_turn );
++void end_turn();
++bool is_active();
++bool is_complete();
++const std::vector<turn_sample> &samples();
++
++} // namespace turn_profiler
++
++#define CATA_TURN_PROFILE_CONCAT_IMPL(lhs, rhs) lhs##rhs
++#define CATA_TURN_PROFILE_CONCAT(lhs, rhs)                                     \
++    CATA_TURN_PROFILE_CONCAT_IMPL(lhs, rhs)
++#define CATA_TURN_PROFILE_SCOPE(id)                                            \
++    ::turn_profiler::scoped_region CATA_TURN_PROFILE_CONCAT(turn_profile_scope_, \
++            __LINE__)(id)
++
++#else
++
++#define CATA_TURN_PROFILE_SCOPE(id)
++
++#endif
++
++#endif // CATA_SRC_TURN_PROFILER_H
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 089672e795d..de7411530c9 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -4,6 +4,13 @@ if (BUILD_TESTING)
+     file(GLOB CATACLYSM_DDA_TEST_SOURCES
+             ${CMAKE_SOURCE_DIR}/tests/*.cpp)
+ 
++    if(TURN_PROFILING)
++        set_source_files_properties(
++            ${CMAKE_SOURCE_DIR}/tests/turn_profiler_test.cpp
++            ${CMAKE_SOURCE_DIR}/src/turn_profiler.cpp
++            PROPERTIES COMPILE_DEFINITIONS CATA_ENABLE_TURN_PROFILER)
++    endif()
++
+     # Enabling benchmarks
+     add_definitions(-DCATCH_CONFIG_ENABLE_BENCHMARKING)
+ 
+@@ -30,6 +37,9 @@ if (BUILD_TESTING)
+ 
+     if (TILES)
+         add_executable(cata_test-tiles ${CATACLYSM_DDA_TEST_SOURCES})
++        if(TURN_PROFILING)
++            target_sources(cata_test-tiles PRIVATE ${CMAKE_SOURCE_DIR}/src/turn_profiler.cpp)
++        endif()
+         if (LOCALIZE)
+             add_dependencies(cata_test-tiles test_mo)
+         endif()
+@@ -54,6 +64,9 @@ if (BUILD_TESTING)
+ 
+     if (CURSES)
+         add_executable(cata_test ${CATACLYSM_DDA_TEST_SOURCES})
++        if(TURN_PROFILING)
++            target_sources(cata_test PRIVATE ${CMAKE_SOURCE_DIR}/src/turn_profiler.cpp)
++        endif()
+         if (LOCALIZE)
+             add_dependencies(cata_test test_mo)
+         endif()
+diff --git a/tests/turn_profiler_test.cpp b/tests/turn_profiler_test.cpp
+new file mode 100644
+index 00000000000..89303254eb2
+--- /dev/null
++++ b/tests/turn_profiler_test.cpp
+@@ -0,0 +1,188 @@
++#include "catch/catch.hpp"
++
++#if defined(CATA_ENABLE_TURN_PROFILER)
++
++#include <locale>
++
++#include "turn_profiler.h"
++
++namespace
++{
++
++class grouped_numbers : public std::numpunct<char>
++{
++    protected:
++        char do_thousands_sep() const override {
++            return ',';
++        }
++
++        std::string do_grouping() const override {
++            return "\3";
++        }
++};
++
++} // namespace
++
++TEST_CASE( "turn profiler separates inclusive and exclusive CPU cycles",
++           "[turn_profiler]" )
++{
++    turn_profiler::recorder recorder( 1 );
++
++    recorder.begin_turn( 42, 100, 100, 1'000 );
++    recorder.enter_region( "map", 10 );
++    recorder.enter_region( "map.fields", 20 );
++    recorder.leave_region( 50 );
++    recorder.leave_region( 80 );
++    const turn_profiler::turn_sample sample = recorder.end_turn( 200, 200, 1'250 );
++
++    CHECK( sample.game_turn == 42 );
++    CHECK( sample.total_cycles == 100 );
++    CHECK( sample.elapsed_microseconds == 250 );
++
++    const turn_profiler::component_sample &map = sample.components.at( "map" );
++    CHECK( map.inclusive_cycles == 70 );
++    CHECK( map.exclusive_cycles == 40 );
++
++    const turn_profiler::component_sample &fields =
++        sample.components.at( "map.fields" );
++    CHECK( fields.inclusive_cycles == 30 );
++    CHECK( fields.exclusive_cycles == 30 );
++
++    const turn_profiler::component_sample &unattributed =
++        sample.components.at( "unattributed" );
++    CHECK( unattributed.exclusive_cycles == 30 );
++}
++
++TEST_CASE( "turn profiler rejects mismatched region nesting",
++           "[turn_profiler]" )
++{
++    turn_profiler::recorder recorder( 1 );
++
++    recorder.begin_turn( 7, 10, 10, 100 );
++    recorder.enter_region( "weather", 12 );
++
++    CHECK_THROWS_WITH( recorder.end_turn( 20, 20, 200 ),
++                       "turn profiler ended a turn with open regions" );
++}
++
++TEST_CASE( "turn profiler accounts for background CPU cycles",
++           "[turn_profiler]" )
++{
++    turn_profiler::recorder recorder( 1 );
++    recorder.begin_turn( 8, 100, 100, 500 );
++    recorder.enter_region( "weather", 10 );
++    recorder.leave_region( 70 );
++
++    const turn_profiler::turn_sample sample = recorder.end_turn( 200, 190, 700 );
++
++    CHECK( sample.components.at( "weather" ).exclusive_cycles == 60 );
++    CHECK( sample.components.at( "background.other" ).exclusive_cycles == 10 );
++    CHECK( sample.components.at( "unattributed" ).exclusive_cycles == 30 );
++}
++
++TEST_CASE( "turn profiler derives aggregate background CPU cycles",
++           "[turn_profiler]" )
++{
++    CHECK( turn_profiler::derive_background_cycles( 100, 200, 120, 180 ) == 40 );
++    CHECK( turn_profiler::derive_background_cycles( 100, 200, 120, 240 ) == 0 );
++    CHECK( turn_profiler::derive_background_cycles( 200, 100, 120, 180 ) == 0 );
++}
++
++TEST_CASE( "turn profiler derives missing hierarchy parents",
++           "[turn_profiler]" )
++{
++    turn_profiler::recorder recorder( 1 );
++    recorder.begin_turn( 10, 100, 100, 500 );
++    recorder.enter_region( "map.fields", 10 );
++    recorder.leave_region( 30 );
++    recorder.enter_region( "map.items", 40 );
++    recorder.leave_region( 70 );
++
++    const turn_profiler::turn_sample sample = recorder.end_turn( 200, 200, 700 );
++
++    CHECK( sample.components.at( "map" ).inclusive_cycles == 50 );
++    CHECK( sample.components.at( "map" ).exclusive_cycles == 0 );
++}
++
++TEST_CASE( "turn profiler renders raw data and all required HTML views",
++           "[turn_profiler]" )
++{
++    turn_profiler::recorder recorder( 1 );
++    recorder.begin_turn( 1'234'567, 1'000, 1'000, 2'000 );
++    recorder.enter_region( "weather", 100 );
++    recorder.leave_region( 160 );
++    recorder.end_turn( 1'100, 1'100, 2'250 );
++
++    turn_profiler::run_metadata metadata;
++    metadata.seed = "fixed-seed";
++    metadata.git_version = "test-version";
++    metadata.compiler = "test-compiler";
++    metadata.build_options = "TURN_PROFILING=ON";
++    metadata.cpu_model = "test-cpu";
++    metadata.windows_version = "test-windows";
++    metadata.executable_sha256 = "test-hash";
++
++    const std::locale previous_locale = std::locale();
++    std::locale::global( std::locale( previous_locale, new grouped_numbers ) );
++    const std::string json =
++        turn_profiler::serialize_json( recorder.samples(), metadata );
++    std::locale::global( previous_locale );
++    CHECK( json.find( R"("completed_turns":1)" ) != std::string::npos );
++    CHECK( json.find( R"("game_turn":1234567)" ) != std::string::npos );
++    CHECK( json.find( R"("unattributed")" ) != std::string::npos );
++
++    const std::string html = turn_profiler::render_html( json );
++    CHECK( html.find( R"(id="stacked-chart")" ) != std::string::npos );
++    CHECK( html.find( R"(id="heatmap")" ) != std::string::npos );
++    CHECK( html.find( R"(id="summary-table")" ) != std::string::npos );
++    CHECK( html.find( R"(id="slow-turn-detail")" ) != std::string::npos );
++    CHECK( html.find( "hierarchyDepth" ) != std::string::npos );
++    CHECK( html.find( R"("completed_turns":1)" ) != std::string::npos );
++    CHECK( html.find( "(()=>{" ) != std::string::npos );
++    CHECK( html.find( "const top=" ) == std::string::npos );
++}
++
++#if defined(_WIN32)
++TEST_CASE( "Windows CPU cycle counters are monotonic", "[turn_profiler]" )
++{
++    const std::uint64_t process_before = turn_profiler::read_process_cycles();
++    const std::uint64_t thread_before = turn_profiler::read_thread_cycles();
++    volatile std::uint64_t work = 0;
++    for( std::uint64_t i = 0; i < 100'000; ++i ) {
++        work += i;
++    }
++    static_cast<void>( work );
++
++    CHECK( turn_profiler::read_process_cycles() >= process_before );
++    CHECK( turn_profiler::read_thread_cycles() >= thread_before );
++}
++
++TEST_CASE( "native turn profiler records an RAII region", "[turn_profiler]" )
++{
++    turn_profiler::start( 1 );
++    turn_profiler::begin_turn( 100 );
++    {
++        turn_profiler::scoped_region region( "map.items" );
++        volatile std::uint64_t work = 0;
++        for( std::uint64_t i = 0; i < 100'000; ++i ) {
++            work += i;
++        }
++        static_cast<void>( work );
++    }
++    turn_profiler::end_turn();
++
++    REQUIRE( turn_profiler::samples().size() == 1 );
++    CHECK( turn_profiler::samples()
++           .front()
++           .components.at( "map.items" )
++           .exclusive_cycles > 0 );
++    CHECK( turn_profiler::samples()
++           .front()
++           .components.at( "profiler" )
++           .exclusive_cycles > 0 );
++    CHECK( turn_profiler::is_complete() );
++    turn_profiler::stop();
++}
++#endif
++
++#endif
+diff --git a/tools/profile-turns.ps1 b/tools/profile-turns.ps1
+new file mode 100644
+index 00000000000..a1d822c00cb
+--- /dev/null
++++ b/tools/profile-turns.ps1
+@@ -0,0 +1,521 @@
++#requires -Version 5.1
++
++<#
++.SYNOPSIS
++Builds and runs the Windows simulation-turn CPU profiler.
++
++.DESCRIPTION
++The script reuses an existing compatible CMake build directory when one is available.
++It enables TURN_PROFILING, rebuilds only affected source files, creates an isolated game,
++and advances that game for a fixed number of simulation turns. The run writes raw JSON
++and a self-contained HTML report. The default run records 10,000 turns with a fixed seed.
++
++The script restores TURN_PROFILING to its original value after the run. If the run succeeds,
++the script deletes the temporary game world. If the run fails, the script preserves the
++temporary game world and prints its path.
++
++.PARAMETER Turns
++Specifies the number of simulation turns. The default is 10000.
++
++.PARAMETER Seed
++Specifies the deterministic random-number seed.
++
++.PARAMETER BuildDirectory
++Specifies a compatible CMake build directory. The script first uses the outer workspace's
++build\cmake directory when that directory exists.
++
++.PARAMETER OutputDirectory
++Specifies the result directory. The script creates a timestamped directory by default.
++
++.PARAMETER NoOpen
++Prevents the script from opening the HTML report after a successful run.
++
++.EXAMPLE
++pwsh -File tools\profile-turns.ps1
++
++Builds the profiler incrementally, records 10,000 turns, and opens the HTML report.
++
++.EXAMPLE
++pwsh -File tools\profile-turns.ps1 -Turns 500 -NoOpen
++
++Records 500 turns and leaves the HTML report closed.
++#>
++
++[CmdletBinding()]
++param(
++    [ValidateRange(1, 1000000)]
++    [int] $Turns = 10000,
++
++    [ValidateNotNullOrEmpty()]
++    [string] $Seed = 'cdda-turn-profile-v1',
++
++    [string] $BuildDirectory,
++
++    [string] $OutputDirectory,
++
++    [switch] $NoOpen
++)
++
++$ErrorActionPreference = 'Stop'
++Set-StrictMode -Version 3.0
++
++function Invoke-Checked {
++    param(
++        [Parameter(Mandatory = $true)]
++        [string] $Command,
++
++        [Parameter(Mandatory = $true)]
++        [string[]] $Arguments
++    )
++
++    Write-Host "> $Command $($Arguments -join ' ')"
++    & $Command @Arguments
++    if ($LASTEXITCODE -ne 0) {
++        throw "Command failed with exit code $LASTEXITCODE`: $Command"
++    }
++}
++
++function ConvertTo-NativeArgument {
++    param(
++        [Parameter(Mandatory = $true)]
++        [string] $Argument
++    )
++
++    if ($Argument.Contains('"')) {
++        throw 'Native process arguments cannot contain a quotation mark.'
++    }
++    $escaped = [regex]::Replace($Argument, '(\\+)$', '$1$1')
++    return '"' + $escaped + '"'
++}
++
++function Invoke-GameProcess {
++    param(
++        [Parameter(Mandatory = $true)]
++        [string] $Executable,
++
++        [Parameter(Mandatory = $true)]
++        [string[]] $Arguments,
++
++        [Parameter(Mandatory = $true)]
++        [string] $WorkingDirectory
++    )
++
++    $startInfo = [Diagnostics.ProcessStartInfo]::new()
++    $startInfo.FileName = $Executable
++    $startInfo.WorkingDirectory = $WorkingDirectory
++    $startInfo.UseShellExecute = $false
++    $startInfo.Arguments = ($Arguments | ForEach-Object {
++        ConvertTo-NativeArgument -Argument $_
++    }) -join ' '
++    Write-Host "> $Executable $($Arguments -join ' ')"
++    $process = [Diagnostics.Process]::Start($startInfo)
++    $process.WaitForExit()
++    if ($process.ExitCode -ne 0) {
++        throw "Game process failed with exit code $($process.ExitCode)."
++    }
++}
++
++function Get-HeadlessBrowser {
++    $candidates = @(
++        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
++        (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
++        (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe')
++    )
++    foreach ($candidate in $candidates) {
++        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
++            return $candidate
++        }
++    }
++    throw 'Microsoft Edge or Google Chrome is required to validate the HTML report.'
++}
++
++function Assert-HtmlReportRenders {
++    param(
++        [Parameter(Mandatory = $true)]
++        [string] $HtmlPath,
++
++        [Parameter(Mandatory = $true)]
++        [string] $BrowserProfileDirectory
++    )
++
++    New-Item -ItemType Directory -Path $BrowserProfileDirectory -Force | Out-Null
++    $browser = Get-HeadlessBrowser
++    $arguments = @(
++        '--headless=new',
++        '--disable-gpu',
++        '--disable-extensions',
++        '--no-first-run',
++        "--user-data-dir=$BrowserProfileDirectory",
++        '--dump-dom',
++        ([Uri]::new([IO.Path]::GetFullPath($HtmlPath)).AbsoluteUri)
++    )
++    $startInfo = [Diagnostics.ProcessStartInfo]::new()
++    $startInfo.FileName = $browser
++    $startInfo.UseShellExecute = $false
++    $startInfo.CreateNoWindow = $true
++    $startInfo.RedirectStandardOutput = $true
++    $startInfo.RedirectStandardError = $true
++    $startInfo.Arguments = ($arguments | ForEach-Object {
++        ConvertTo-NativeArgument -Argument $_
++    }) -join ' '
++    $process = [Diagnostics.Process]::Start($startInfo)
++    $outputTask = $process.StandardOutput.ReadToEndAsync()
++    $errorTask = $process.StandardError.ReadToEndAsync()
++    $process.WaitForExit()
++    $renderedHtml = $outputTask.GetAwaiter().GetResult()
++    $browserError = $errorTask.GetAwaiter().GetResult()
++    if ($process.ExitCode -ne 0) {
++        throw "HTML report browser validation failed with exit code $($process.ExitCode): $browserError"
++    }
++    if ($renderedHtml -notmatch '<p class="meta" id="metadata">[^<]+</p>') {
++        throw 'The HTML report loaded, but its JavaScript did not render the metadata.'
++    }
++}
++
++function Get-VisualStudioRoot {
++    $vswhere = Join-Path ${env:ProgramFiles(x86)} `
++        'Microsoft Visual Studio\Installer\vswhere.exe'
++    if (Test-Path -LiteralPath $vswhere -PathType Leaf) {
++        $path = & $vswhere -products '*' -version '[17.0,18.0)' -latest `
++            -property installationPath -requires `
++            Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
++            Microsoft.VisualStudio.Component.VC.CMake.Project |
++            Select-Object -First 1
++        if ($path) {
++            return $path.Trim()
++        }
++    }
++
++    $fallback = Join-Path $env:ProgramFiles 'Microsoft Visual Studio\2022\Community'
++    if (Test-Path -LiteralPath $fallback -PathType Container) {
++        return $fallback
++    }
++    throw 'Visual Studio 2022 with MSVC and CMake was not found.'
++}
++
++function Get-CMakeCommand {
++    $command = Get-Command cmake.exe -ErrorAction SilentlyContinue
++    if ($command) {
++        return $command.Source
++    }
++    $candidate = Join-Path (Get-VisualStudioRoot) `
++        'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
++    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
++        return $candidate
++    }
++    throw 'CMake was not found.'
++}
++
++function Assert-ChildPath {
++    param(
++        [Parameter(Mandatory = $true)]
++        [string] $Path,
++
++        [Parameter(Mandatory = $true)]
++        [string] $Parent
++    )
++
++    $resolvedPath = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
++    $resolvedParent = [IO.Path]::GetFullPath($Parent).TrimEnd('\', '/')
++    $prefix = $resolvedParent + [IO.Path]::DirectorySeparatorChar
++    if (-not $resolvedPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
++        throw "The temporary path is outside its required parent: $resolvedPath"
++    }
++}
++
++function Get-CacheValue {
++    param(
++        [Parameter(Mandatory = $true)]
++        [string] $CachePath,
++
++        [Parameter(Mandatory = $true)]
++        [string] $Name
++    )
++
++    if (-not (Test-Path -LiteralPath $CachePath -PathType Leaf)) {
++        return $null
++    }
++    $match = Select-String -LiteralPath $CachePath `
++        -Pattern ("^{0}:[^=]*=(.*)$" -f [regex]::Escape($Name)) |
++        Select-Object -First 1
++    if ($match) {
++        return $match.Matches[0].Groups[1].Value
++    }
++    return $null
++}
++
++function Set-ShaderEnvironment {
++    param(
++        [Parameter(Mandatory = $true)]
++        [string] $CMakeRoot
++    )
++
++    $toolRoot = Join-Path $CMakeRoot 'vcpkg_installed\x64-windows-static\tools'
++    $glslang = Join-Path $toolRoot 'glslang\glslangValidator.exe'
++    $shadercross = Join-Path $toolRoot 'sdl3-shadercross\shadercross.exe'
++    foreach ($path in @($glslang, $shadercross)) {
++        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
++            throw "A required shader tool was not found: $path"
++        }
++    }
++    $env:GLSLANG = $glslang
++    $env:SDL_SHADERCROSS = $shadercross
++}
++
++function Invoke-MsvcProfilerBuild {
++    param(
++        [Parameter(Mandatory = $true)]
++        [string] $CMakeRoot,
++
++        [Parameter(Mandatory = $true)]
++        [bool] $ProfilingEnabled,
++
++        [bool] $ForceRecompile = $false
++    )
++
++    $msbuild = Join-Path (Get-VisualStudioRoot) 'MSBuild\Current\Bin\MSBuild.exe'
++    if (-not (Test-Path -LiteralPath $msbuild -PathType Leaf)) {
++        throw "MSBuild was not found: $msbuild"
++    }
++    $commonProject = Join-Path $CMakeRoot 'src\cataclysm-tiles-common.vcxproj'
++    $gameProject = Join-Path $CMakeRoot 'src\cataclysm-tiles.vcxproj'
++    foreach ($project in @($commonProject, $gameProject)) {
++        if (-not (Test-Path -LiteralPath $project -PathType Leaf)) {
++            throw "A required MSVC project was not found: $project"
++        }
++    }
++
++    $commonSources = @('do_turn.cpp', 'main_menu.cpp', 'newcharacter.cpp')
++    foreach ($name in $commonSources) {
++        $source = Join-Path $sourceRoot "src\$name"
++        $object = Join-Path $CMakeRoot `
++            "src\cataclysm-tiles-common.dir\RelWithDebInfo\$($name -replace '\.cpp$', '.obj')"
++        if (-not $ForceRecompile -and (Test-Path -LiteralPath $object -PathType Leaf) -and
++                (Get-Item -LiteralPath $object).Length -gt 0 -and
++                (Get-Item -LiteralPath $object).LastWriteTimeUtc -ge
++                (Get-Item -LiteralPath $source).LastWriteTimeUtc) {
++            continue
++        }
++        Invoke-Checked -Command $msbuild -Arguments @(
++            $commonProject,
++            '/nologo',
++            '/t:ClCompile',
++            '/p:Configuration=RelWithDebInfo',
++            '/p:Platform=x64',
++            "/p:SelectedFiles=$source",
++            '/p:SelectedFilesBuildPCH=false',
++            '/verbosity:minimal',
++            '/m'
++        )
++    }
++
++    $gameSources = @('main.cpp')
++    if ($ProfilingEnabled) {
++        $gameSources += 'turn_profiler.cpp'
++    }
++    foreach ($name in $gameSources) {
++        $source = Join-Path $sourceRoot "src\$name"
++        $object = Join-Path $CMakeRoot `
++            "src\cataclysm-tiles.dir\RelWithDebInfo\$($name -replace '\.cpp$', '.obj')"
++        if (-not $ForceRecompile -and (Test-Path -LiteralPath $object -PathType Leaf) -and
++                (Get-Item -LiteralPath $object).Length -gt 0 -and
++                (Get-Item -LiteralPath $object).LastWriteTimeUtc -ge
++                (Get-Item -LiteralPath $source).LastWriteTimeUtc) {
++            continue
++        }
++        Invoke-Checked -Command $msbuild -Arguments @(
++            $gameProject,
++            '/nologo',
++            '/t:ClCompile',
++            '/p:Configuration=RelWithDebInfo',
++            '/p:Platform=x64',
++            "/p:SelectedFiles=$source",
++            '/p:SelectedFilesBuildPCH=false',
++            '/verbosity:minimal',
++            '/m'
++        )
++    }
++
++    Invoke-Checked -Command $msbuild -Arguments @(
++        $commonProject,
++        '/nologo',
++        '/t:FinalizeBuildStatus',
++        '/p:Configuration=RelWithDebInfo',
++        '/p:Platform=x64',
++        '/p:BuildProjectReferences=false',
++        '/verbosity:minimal'
++    )
++    Invoke-Checked -Command $msbuild -Arguments @(
++        $gameProject,
++        '/nologo',
++        '/t:Build',
++        '/p:Configuration=RelWithDebInfo',
++        '/p:Platform=x64',
++        '/p:BuildProjectReferences=false',
++        '/verbosity:minimal',
++        '/m'
++    )
++}
++
++function Invoke-ProfilerBuild {
++    param(
++        [Parameter(Mandatory = $true)]
++        [string] $CMakeRoot,
++
++        [Parameter(Mandatory = $true)]
++        [bool] $ProfilingEnabled,
++
++        [bool] $ForceRecompile = $false
++    )
++
++    $cache = Join-Path $CMakeRoot 'CMakeCache.txt'
++    $generator = Get-CacheValue -CachePath $cache -Name 'CMAKE_GENERATOR'
++    if ($generator -eq 'Visual Studio 17 2022') {
++        Invoke-MsvcProfilerBuild -CMakeRoot $CMakeRoot `
++            -ProfilingEnabled $ProfilingEnabled -ForceRecompile $ForceRecompile
++        return
++    }
++    Invoke-Checked -Command $cmake -Arguments @(
++        '--build', $CMakeRoot,
++        '--config', 'RelWithDebInfo',
++        '--parallel',
++        '--target', 'cataclysm-tiles'
++    )
++}
++
++$sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
++$workspaceRoot = [IO.Path]::GetFullPath((Join-Path $sourceRoot '..'))
++$defaultBuild = Join-Path $workspaceRoot 'build\cmake'
++if (-not $BuildDirectory) {
++    if (Test-Path -LiteralPath (Join-Path $defaultBuild 'CMakeCache.txt') -PathType Leaf) {
++        $BuildDirectory = $defaultBuild
++    } else {
++        $BuildDirectory = Join-Path $sourceRoot 'out\build\windows-turn-profiler'
++    }
++}
++$BuildDirectory = [IO.Path]::GetFullPath($BuildDirectory)
++
++if (-not $OutputDirectory) {
++    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
++    $OutputDirectory = Join-Path $sourceRoot "turn-profile-results\$stamp"
++}
++$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
++
++$runParent = Join-Path $BuildDirectory 'turn-profile-runs'
++$runRoot = Join-Path $runParent ([guid]::NewGuid().ToString('N'))
++Assert-ChildPath -Path $runRoot -Parent $runParent
++New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
++New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
++
++$cmake = Get-CMakeCommand
++$cachePath = Join-Path $BuildDirectory 'CMakeCache.txt'
++$originalProfiling = Get-CacheValue -CachePath $cachePath -Name 'TURN_PROFILING'
++$restoreProfiling = $originalProfiling -ne 'ON'
++$profileSucceeded = $false
++$profileConfigured = $false
++
++try {
++    if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
++        $vsRoot = Get-VisualStudioRoot
++        $env:VCPKG_ROOT = Join-Path $vsRoot 'VC\vcpkg'
++        Invoke-Checked -Command $cmake -Arguments @(
++            '-S', $sourceRoot,
++            '-B', $BuildDirectory,
++            '--preset', 'windows-tiles-sounds-x64-msvc',
++            '--log-level=WARNING',
++            '-DTURN_PROFILING:BOOL=ON',
++            '-DLOCALIZE:BOOL=OFF',
++            '-DTESTS:BOOL=ON'
++        )
++    } else {
++        $configuredSource = Get-CacheValue -CachePath $cachePath `
++            -Name 'CMAKE_HOME_DIRECTORY'
++        if (-not $configuredSource -or
++                [IO.Path]::GetFullPath($configuredSource) -ne $sourceRoot) {
++            throw "The CMake build directory belongs to another source tree: $BuildDirectory"
++        }
++        Invoke-Checked -Command $cmake -Arguments @(
++            '-S', $sourceRoot,
++            '-B', $BuildDirectory,
++            '--log-level=WARNING',
++            '-DTURN_PROFILING:BOOL=ON'
++        )
++    }
++    $profileConfigured = $true
++    Set-ShaderEnvironment -CMakeRoot $BuildDirectory
++    Invoke-ProfilerBuild -CMakeRoot $BuildDirectory -ProfilingEnabled $true `
++        -ForceRecompile $true
++
++    $executable = Get-ChildItem -LiteralPath $BuildDirectory `
++        -Filter 'cataclysm-tiles.exe' -File -Recurse |
++        Where-Object { $_.FullName -match '[\\/]RelWithDebInfo[\\/]' } |
++        Select-Object -First 1
++    if (-not $executable) {
++        throw 'The RelWithDebInfo cataclysm-tiles.exe was not found.'
++    }
++    $sha256 = (Get-FileHash -LiteralPath $executable.FullName -Algorithm SHA256).Hash
++
++    Invoke-GameProcess -Executable $executable.FullName -WorkingDirectory $sourceRoot `
++        -Arguments @(
++        '--basepath', $sourceRoot,
++        '--userdir', $runRoot,
++        '--seed', $Seed,
++        '--noverify',
++        '--disable-ascii-art',
++        '--turn-profile', $Turns.ToString([Globalization.CultureInfo]::InvariantCulture),
++        '--turn-profile-output', $OutputDirectory,
++        '--turn-profile-executable-sha256', $sha256,
++        '--turn-profile-seed-label', $Seed
++    )
++
++    $jsonPath = Join-Path $OutputDirectory 'turn-profile.json'
++    $htmlPath = Join-Path $OutputDirectory 'turn-profile.html'
++    foreach ($path in @($jsonPath, $htmlPath)) {
++        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
++            throw "The profiler did not create a required result file: $path"
++        }
++    }
++    $profile = Get-Content -Raw -LiteralPath $jsonPath | ConvertFrom-Json
++    if ([int]$profile.completed_turns -ne $Turns) {
++        throw "The profiler recorded $($profile.completed_turns) turns instead of $Turns."
++    }
++    if (@($profile.turns).Count -ne $Turns) {
++        throw "The profiler wrote $(@($profile.turns).Count) turn records instead of $Turns."
++    }
++    if ($profile.metadata.executable_sha256 -ne $sha256) {
++        throw 'The profile metadata does not identify the executable that was run.'
++    }
++    $browserProfile = Join-Path $runRoot 'report-browser-profile'
++    Assert-ChildPath -Path $browserProfile -Parent $runRoot
++    Assert-HtmlReportRenders -HtmlPath $htmlPath `
++        -BrowserProfileDirectory $browserProfile
++    $profileSucceeded = $true
++
++    Write-Host ''
++    Write-Host "Raw data: $jsonPath"
++    Write-Host "HTML report: $htmlPath"
++    if (-not $NoOpen) {
++        Start-Process -FilePath $htmlPath
++    }
++} finally {
++    if ($restoreProfiling -and $profileConfigured) {
++        Write-Host 'Restoring the non-profiled build configuration.'
++        Invoke-Checked -Command $cmake -Arguments @(
++            '-S', $sourceRoot,
++            '-B', $BuildDirectory,
++            '--log-level=WARNING',
++            '-DTURN_PROFILING:BOOL=OFF'
++        )
++        Set-ShaderEnvironment -CMakeRoot $BuildDirectory
++        Invoke-ProfilerBuild -CMakeRoot $BuildDirectory -ProfilingEnabled $false `
++            -ForceRecompile $true
++    }
++
++    if ($profileSucceeded) {
++        if (Test-Path -LiteralPath $runRoot) {
++            Remove-Item -LiteralPath $runRoot -Recurse -Force
++        }
++    } else {
++        Write-Warning "The temporary game was preserved: $runRoot"
++    }
++}
+-- 
+2.50.0.windows.2
+

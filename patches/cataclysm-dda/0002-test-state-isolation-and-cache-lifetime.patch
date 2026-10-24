@@ -1,0 +1,148 @@
+From ed4c5c58fe88621244b884f03b531d23859891b7 Mon Sep 17 00:00:00 2001
+From: MegasKomnenos <35184490+MegasKomnenos@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 21:09:14 +0900
+Subject: [PATCH 2/3] =?UTF-8?q?=ED=85=8C=EC=8A=A4=ED=8A=B8=20=EC=83=81?=
+ =?UTF-8?q?=ED=83=9C=20=EA=B2=A9=EB=A6=AC=EC=99=80=20=EC=BA=90=EC=8B=9C=20?=
+ =?UTF-8?q?=EC=88=98=EB=AA=85=EC=9D=84=20=EB=B3=B4=EC=99=84=ED=95=9C?=
+ =?UTF-8?q?=EB=8B=A4?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/map.cpp                      | 13 +++++++++----
+ src/map.h                        |  4 ++--
+ tests/crafting_test.cpp          |  2 ++
+ tests/iteminfo_test.cpp          |  1 +
+ tests/player_helpers.cpp         |  3 +++
+ tests/speed_description_test.cpp |  2 ++
+ 6 files changed, 19 insertions(+), 6 deletions(-)
+
+diff --git a/src/map.cpp b/src/map.cpp
+index d20e5958464..4662de021ec 100644
+--- a/src/map.cpp
++++ b/src/map.cpp
+@@ -369,14 +369,19 @@ map &map::operator=( map && ) = default;
+ 
+ static submap null_submap;
+ 
+-std::list<std::unique_ptr<level_cache>> map::free_cache_pool;
++std::list<std::unique_ptr<level_cache>> &map::free_cache_pool()
++{
++    static auto *const pool = new std::list<std::unique_ptr<level_cache>>();
++    return *pool;
++}
+ 
+ std::unique_ptr<level_cache, map::level_cache_free> map::alloc_cache()
+ {
+     std::unique_ptr<level_cache, level_cache_free> cache;
+-    if( !free_cache_pool.empty() ) {
+-        cache.reset( free_cache_pool.front().release() );
+-        free_cache_pool.pop_front();
++    std::list<std::unique_ptr<level_cache>> &pool = free_cache_pool();
++    if( !pool.empty() ) {
++        cache.reset( pool.front().release() );
++        pool.pop_front();
+         cache->clear();
+     } else {
+         cache.reset( new level_cache{} );
+diff --git a/src/map.h b/src/map.h
+index 5a580cdf30b..cda412e44df 100644
+--- a/src/map.h
++++ b/src/map.h
+@@ -2282,10 +2282,10 @@ class map
+         /**
+          * Holds free'd caches because we probably don't have to return the memory to the OS.
+          */
+-        static std::list<std::unique_ptr<level_cache>> free_cache_pool;
++        static std::list<std::unique_ptr<level_cache>> &free_cache_pool();
+         struct level_cache_free {
+             void operator()( level_cache *cache ) {
+-                free_cache_pool.emplace_back( cache );
++                free_cache_pool().emplace_back( cache );
+             }
+         };
+         /**
+diff --git a/tests/crafting_test.cpp b/tests/crafting_test.cpp
+index 40783d4e58f..52e38ed49c4 100644
+--- a/tests/crafting_test.cpp
++++ b/tests/crafting_test.cpp
+@@ -521,6 +521,7 @@ static void prep_craft( const recipe_id &rid, const std::vector<item> &tools,
+                         bool expect_craftable, int offset = 0, bool grant_profs = false, bool plug_in_tools = true )
+ {
+     map &here = get_map();
++    set_time( calendar::turn_zero + 12_hours );
+     clear_avatar();
+     clear_map_without_vision();
+ 
+@@ -1778,6 +1779,7 @@ static void grant_proficiencies_to_character( Character &you, const recipe &r,
+ static void test_skill_progression( const recipe_id &test_recipe, int expected_turns_taken,
+                                     int morale_level, bool grant_optional_proficiencies )
+ {
++    clear_avatar();
+     Character &you = get_player_character();
+     int actual_turns_taken = 0;
+     const recipe &r = *test_recipe;
+diff --git a/tests/iteminfo_test.cpp b/tests/iteminfo_test.cpp
+index 6270d9d3b38..3fa2ae65165 100644
+--- a/tests/iteminfo_test.cpp
++++ b/tests/iteminfo_test.cpp
+@@ -2765,6 +2765,7 @@ TEST_CASE( "repairable_and_with_what_tools", "[iteminfo][repair]" )
+ TEST_CASE( "disassembly_time_and_yield", "[iteminfo][disassembly]" )
+ {
+     clear_avatar();
++    override_option opt_dist( "DISTANCE_UNITS", "imperial" );
+ 
+     std::vector<iteminfo_parts> disassemble = { iteminfo_parts::DESCRIPTION_COMPONENTS_DISASSEMBLE };
+ 
+diff --git a/tests/player_helpers.cpp b/tests/player_helpers.cpp
+index 9043f44460f..885528cb40a 100644
+--- a/tests/player_helpers.cpp
++++ b/tests/player_helpers.cpp
+@@ -24,6 +24,7 @@
+ #include "itype.h"
+ #include "magic.h"
+ #include "map.h"
++#include "mission.h"
+ #include "npc.h"
+ #include "pimpl.h"
+ #include "player_activity.h"
+@@ -146,6 +147,7 @@ void clear_character( Character &dummy, bool skip_nutrition )
+ 
+     // Make sure we don't carry around weird effects.
+     dummy.clear_effects();
++    dummy.process_effects();
+     dummy.set_underwater( false );
+ 
+     // Make stats nominal.
+@@ -228,6 +230,7 @@ void clear_avatar()
+     avatar.clear_identified();
+     avatar.clear_nutrition();
+     avatar.reset_all_missions();
++    mission::clear_all();
+ }
+ 
+ void equip_shooter( npc &shooter, const std::vector<itype_id> &apparel )
+diff --git a/tests/speed_description_test.cpp b/tests/speed_description_test.cpp
+index a9dfe2df988..76097d6f0d7 100644
+--- a/tests/speed_description_test.cpp
++++ b/tests/speed_description_test.cpp
+@@ -3,6 +3,7 @@
+ #include <vector>
+ 
+ #include "cata_catch.h"
++#include "map_helpers.h"
+ #include "monster.h"
+ #include "mtype.h"
+ #include "player_helpers.h"
+@@ -27,6 +28,7 @@ TEST_CASE( "monster_speed_description", "[monster][speed_description]" )
+      */
+ 
+     auto get_speed_string = []( const mtype_id & mon_id ) {
++        clear_map_without_vision();
+         clear_avatar();
+         monster mon( mon_id );
+         return monster::speed_description(
+-- 
+2.50.0.windows.2
+

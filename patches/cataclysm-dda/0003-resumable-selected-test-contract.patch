@@ -1,0 +1,737 @@
+From 3092abfcfcbd30c9d97bd12cafda07daab54178c Mon Sep 17 00:00:00 2001
+From: MegasKomnenos <35184490+MegasKomnenos@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 11:56:34 +0900
+Subject: [PATCH 3/3] =?UTF-8?q?=EC=84=A0=ED=83=9D=20=ED=85=8C=EC=8A=A4?=
+ =?UTF-8?q?=ED=8A=B8=EC=9D=98=20=EC=9E=AC=EA=B0=9C=20=EA=B0=80=EB=8A=A5?=
+ =?UTF-8?q?=ED=95=9C=20=EC=8B=A4=ED=96=89=20=EA=B3=84=EC=95=BD=EC=9D=84=20?=
+ =?UTF-8?q?=EC=B6=94=EA=B0=80=ED=95=9C=EB=8B=A4?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ tests/crafting_test.cpp       |  11 +-
+ tests/debug_capture_test.cpp  |  21 ++--
+ tests/monfactions_test.cpp    |   3 +-
+ tests/monster_test.cpp        |   6 +-
+ tests/ranged_balance_test.cpp |   3 +-
+ tests/test_main.cpp           | 226 +++++++++++++++++++++++++++++++++-
+ tests/test_output.cpp         |  30 +++++
+ tests/test_output.h           |   8 ++
+ tests/test_output_test.cpp    |  47 +++++++
+ tests/water_movement_test.cpp |  11 +-
+ tests/weakpoint_test.cpp      |   8 +-
+ 11 files changed, 345 insertions(+), 29 deletions(-)
+ create mode 100644 tests/test_output.cpp
+ create mode 100644 tests/test_output.h
+ create mode 100644 tests/test_output_test.cpp
+
+diff --git a/tests/crafting_test.cpp b/tests/crafting_test.cpp
+index 52e38ed49c4..56d7484dde2 100644
+--- a/tests/crafting_test.cpp
++++ b/tests/crafting_test.cpp
+@@ -1,5 +1,6 @@
+ #include <algorithm>
+ #include <climits>
++#include <filesystem>
+ #include <fstream>
+ #include <functional>
+ #include <iostream>
+@@ -55,6 +56,7 @@
+ #include "skill.h"
+ #include "string_formatter.h"
+ #include "temp_crafting_inventory.h"
++#include "test_output.h"
+ #include "type_id.h"
+ #include "units.h"
+ #include "value_ptr.h"
+@@ -747,16 +749,17 @@ TEST_CASE( "synthetic_recipe_fail_chances", "[.]" )
+     };
+     for( const std::pair<int, bool> &scen : scens ) {
+         std::ofstream output;
+-        std::string filename = string_format( "recipe_fails_skill%d_%s.csv", scen.first,
+-                                              scen.second ? "has_profs" : "no_profs" );
+-        output.open( filename );
++        const std::string filename = string_format( "recipe_fails_skill%d_%s.csv", scen.first,
++                                     scen.second ? "has_profs" : "no_profs" );
++        const std::filesystem::path output_path = test_output_path( filename );
++        output.open( output_path );
+         REQUIRE( output.is_open() );
+         output << "Recipe,Minor Fail Chance,Catastrophic Fail Chance\n";
+         for( const std::pair<const recipe_id, recipe> &rec : recipe_dict ) {
+             std::pair<float, float> ret = scen_fail_chance( rec.first, scen.first, scen.second );
+             output << string_format( "%s,%g,%g\n", rec.first.str(), ret.first, ret.second );
+         }
+-        std::cout << "Output written to " << filename << std::endl;
++        std::cout << "Output written to " << output_path.string() << std::endl;
+     }
+ }
+ 
+diff --git a/tests/debug_capture_test.cpp b/tests/debug_capture_test.cpp
+index 8b6afc2060d..d6fffe841ae 100644
+--- a/tests/debug_capture_test.cpp
++++ b/tests/debug_capture_test.cpp
+@@ -12,8 +12,9 @@
+ #include "cata_catch.h"
+ #include "debug.h"
+ #include "debug_capture.h"
++#include "test_output.h"
+ 
+-TEST_CASE( "capture_json_escape_round_trip", "[debug_capture]" )
++TEST_CASE( "capture_json_escape_round_trip", "[debug_capture][nogame]" )
+ {
+     SECTION( "plain ASCII passes through" ) {
+         CHECK( debug_menu::capture_json_escape( "hello world" ) == "hello world" );
+@@ -40,7 +41,7 @@ TEST_CASE( "capture_json_escape_round_trip", "[debug_capture]" )
+     }
+ }
+ 
+-TEST_CASE( "capture_ring_trimming", "[debug_capture]" )
++TEST_CASE( "capture_ring_trimming", "[debug_capture][nogame]" )
+ {
+     debug_menu::debug_capture &cap = debug_menu::debug_capture::instance();
+     cap.clear_logs();
+@@ -58,7 +59,7 @@ TEST_CASE( "capture_ring_trimming", "[debug_capture]" )
+     cap.clear_logs();
+ }
+ 
+-TEST_CASE( "capture_eoc_trace_ring", "[debug_capture]" )
++TEST_CASE( "capture_eoc_trace_ring", "[debug_capture][nogame]" )
+ {
+     debug_menu::debug_capture &cap = debug_menu::debug_capture::instance();
+     cap.clear_eoc_traces();
+@@ -75,7 +76,7 @@ TEST_CASE( "capture_eoc_trace_ring", "[debug_capture]" )
+     cap.settings().eoc_trace_capture = false;
+ }
+ 
+-TEST_CASE( "capture_monitor_basic", "[debug_capture]" )
++TEST_CASE( "capture_monitor_basic", "[debug_capture][nogame]" )
+ {
+     debug_menu::debug_capture &cap = debug_menu::debug_capture::instance();
+     cap.clear_logs();
+@@ -96,11 +97,11 @@ TEST_CASE( "capture_monitor_basic", "[debug_capture]" )
+     cap.clear_logs();
+ }
+ 
+-TEST_CASE( "capture_jsonl_byte_counter_rebase_on_existing_file", "[debug_capture]" )
++TEST_CASE( "capture_jsonl_byte_counter_rebase_on_existing_file", "[debug_capture][nogame]" )
+ {
+     // Write a placeholder file, then attach JSONL output to it -- the byte
+     // counter should reflect existing file size, not zero.
+-    const std::string path = "test_jsonl_rebase.jsonl";
++    const std::string path = test_output_path( "test_jsonl_rebase.jsonl" ).string();
+     {
+         std::ofstream pre( path, std::ios::trunc );
+         for( int i = 0; i < 100; i++ ) {
+@@ -126,7 +127,7 @@ TEST_CASE( "capture_jsonl_byte_counter_rebase_on_existing_file", "[debug_capture
+     ( void )rm_rc;
+ }
+ 
+-TEST_CASE( "capture_json_escape_produces_valid_json", "[debug_capture]" )
++TEST_CASE( "capture_json_escape_produces_valid_json", "[debug_capture][nogame]" )
+ {
+     // Control chars and non-ASCII become \uXXXX, so the result is a valid JSON
+     // string body once wrapped in quotes.
+@@ -147,7 +148,7 @@ TEST_CASE( "capture_json_escape_produces_valid_json", "[debug_capture]" )
+     }
+ }
+ 
+-TEST_CASE( "capture_resize_feed_generation", "[debug_capture]" )
++TEST_CASE( "capture_resize_feed_generation", "[debug_capture][nogame]" )
+ {
+     debug_menu::debug_capture &cap = debug_menu::debug_capture::instance();
+     cap.clear_logs();
+@@ -173,9 +174,9 @@ TEST_CASE( "capture_resize_feed_generation", "[debug_capture]" )
+     cap.clear_logs();
+ }
+ 
+-TEST_CASE( "capture_trace_file_rotation", "[debug_capture]" )
++TEST_CASE( "capture_trace_file_rotation", "[debug_capture][nogame]" )
+ {
+-    const std::string base = "test_trace_rotate.jsonl";
++    const std::string base = test_output_path( "test_trace_rotate.jsonl" ).string();
+     const std::string r1 = base + ".1";
+     const std::string r2 = base + ".2";
+     const std::string r2_tmp = r2 + ".tmp";
+diff --git a/tests/monfactions_test.cpp b/tests/monfactions_test.cpp
+index 64eb68ab315..00fdbd59991 100644
+--- a/tests/monfactions_test.cpp
++++ b/tests/monfactions_test.cpp
+@@ -6,6 +6,7 @@
+ 
+ #include "cata_catch.h"
+ #include "monfaction.h"
++#include "test_output.h"
+ #include "type_id.h"
+ 
+ static const mfaction_str_id monfaction_animal( "animal" );
+@@ -45,7 +46,7 @@ static std::string att_enum_to_string( mf_attitude att )
+ TEST_CASE( "generate_monfactions_attitude_matrix", "[.]" )
+ {
+     std::ofstream outfile;
+-    outfile.open( std::filesystem::u8path( "monfactions.txt" ) );
++    outfile.open( test_output_path( "monfactions.txt" ) );
+     for( const monfaction &f : monfactions::get_all() ) {
+         for( const monfaction &f1 : monfactions::get_all() ) {
+             mf_attitude att = f.attitude( f1.id );
+diff --git a/tests/monster_test.cpp b/tests/monster_test.cpp
+index dcf7fa15727..1debd743808 100644
+--- a/tests/monster_test.cpp
++++ b/tests/monster_test.cpp
+@@ -44,6 +44,7 @@
+ #include "rng.h"
+ #include "sounds.h"
+ #include "submap.h"
++#include "test_output.h"
+ #include "test_statistics.h"
+ #include "trap.h"
+ #include "type_id.h"
+@@ -298,9 +299,8 @@ static void test_moves_to_squares( const std::string &monster_type, const bool w
+ 
+     if( write_data ) {
+         std::ofstream data;
+-        data.open( std::filesystem::u8path( "slope_test_data_" + std::string( (
+-                                                trigdist ? "trig_" : "square_" ) ) +
+-                                            monster_type ) );
++        data.open( test_output_path( "slope_test_data_" + std::string(
++                                         trigdist ? "trig_" : "square_" ) + monster_type ) );
+         for( const auto &stat_pair : turns_at_angle ) {
+             data << stat_pair.first << " " << stat_pair.second.avg() << "\n";
+         }
+diff --git a/tests/ranged_balance_test.cpp b/tests/ranged_balance_test.cpp
+index 1e6ba87fafa..667ba0ae75b 100644
+--- a/tests/ranged_balance_test.cpp
++++ b/tests/ranged_balance_test.cpp
+@@ -35,6 +35,7 @@
+ #include "ranged.h"
+ #include "rng.h"
+ #include "test_statistics.h"
++#include "test_output.h"
+ #include "translations.h"
+ #include "type_id.h"
+ #include "units.h"
+@@ -483,7 +484,7 @@ static void range_test( const Threshold &test_threshold, bool write_data = false
+         } );
+ 
+         if( !similar_to_previous_test_results ) {
+-            write_to_file( "./data/json/hit_range.json", [&]( std::ostream & fsa ) {
++            write_to_file( test_output_path( "hit_range.json" ).string(), [&]( std::ostream & fsa ) {
+                 JsonOut j_out( fsa );
+                 j_out.start_array();
+                 j_out.start_object();
+diff --git a/tests/test_main.cpp b/tests/test_main.cpp
+index 1e9a7772bd0..7d15e9feaed 100644
+--- a/tests/test_main.cpp
++++ b/tests/test_main.cpp
+@@ -8,11 +8,15 @@
+ #include <cstdio>
+ #include <cstdlib>
+ #include <exception>
++#include <filesystem>
++#include <fstream>
+ #include <functional>
+ #include <iostream>
++#include <limits>
+ #include <memory>
+ #include <optional>
+ #include <random>
++#include <sstream>
+ #include <string>
+ #include <string_view>
+ #include <utility>
+@@ -50,6 +54,7 @@
+ #include "path_info.h"
+ #include "point.h"
+ #include "rng.h"
++#include "test_output.h"
+ #include "type_id.h"
+ #include "units.h"
+ #include "weather.h"
+@@ -67,6 +72,11 @@ static bool dont_save{ false };
+ static option_overrides_t option_overrides_for_test_suite;
+ static std::string error_fmt = "human-readable";
+ static int rng_seed_fuzz_iterations = 0;
++static std::string progress_log_path;
++static std::string output_dir_path;
++static std::string test_plan_path;
++static std::string current_chunk_id;
++static std::ofstream progress_log;
+ 
+ static std::chrono::system_clock::time_point start_time;
+ static std::chrono::system_clock::time_point end_time;
+@@ -208,6 +218,97 @@ static option_overrides_t extract_option_overrides( const std::string_view optio
+ namespace
+ {
+ 
++struct test_plan_chunk {
++    std::string id;
++    unsigned int seed = 0;
++    std::vector<std::string> tests;
++    std::string output_dir;
++};
++
++static std::vector<test_plan_chunk> load_test_plan( const std::string &path )
++{
++    std::ifstream input( std::filesystem::u8path( path ) );
++    if( !input.is_open() ) {
++        throw std::runtime_error( "Unable to open test plan: " + path );
++    }
++    TextJsonIn jsin( input );
++    TextJsonObject root = jsin.get_object();
++    if( root.get_int( "schema_version" ) != 1 ) {
++        root.throw_error_at( "schema_version", "test plan schema_version must be 1" );
++    }
++
++    std::vector<test_plan_chunk> result;
++    for( TextJsonObject chunk_object : root.get_array( "chunks" ) ) {
++        test_plan_chunk chunk;
++        chunk.id = chunk_object.get_string( "id" );
++        uint64_t seed = 0;
++        chunk_object.read( "seed", seed );
++        if( seed > std::numeric_limits<unsigned int>::max() ) {
++            chunk_object.throw_error_at( "seed", "test plan seed is out of range" );
++        }
++        chunk.seed = static_cast<unsigned int>( seed );
++        chunk.output_dir = chunk_object.get_string( "output_dir" );
++        for( const std::string test : chunk_object.get_array( "tests" ) ) {
++            chunk.tests.push_back( test );
++        }
++        if( chunk.id.empty() || chunk.seed == 0 || chunk.tests.empty() || chunk.output_dir.empty() ) {
++            chunk_object.throw_error( "test plan chunk has an empty required field" );
++        }
++        result.push_back( std::move( chunk ) );
++    }
++    if( result.empty() ) {
++        root.throw_error_at( "chunks", "test plan has no chunks" );
++    }
++    return result;
++}
++
++static std::string make_test_filter( const std::vector<std::string> &tests )
++{
++    std::string result;
++    for( const std::string &test : tests ) {
++        if( !result.empty() ) {
++            result.push_back( ',' );
++        }
++        result += test;
++    }
++    return result;
++}
++
++static std::chrono::steady_clock::time_point test_case_start_time;
++
++static int64_t unix_time_milliseconds()
++{
++    return std::chrono::duration_cast<std::chrono::milliseconds>(
++               std::chrono::system_clock::now().time_since_epoch() ).count();
++}
++
++static void write_progress_event( const std::string &event,
++                                  const std::function<void( JsonOut & )> &write_members )
++{
++    if( !progress_log.is_open() ) {
++        return;
++    }
++
++    std::ostringstream line;
++    JsonOut jsout( line );
++    jsout.start_object();
++    jsout.member( "schema_version", 1 );
++    jsout.member( "event", event );
++    jsout.member( "timestamp_unix_ms", unix_time_milliseconds() );
++    if( !current_chunk_id.empty() ) {
++        jsout.member( "chunk_id", current_chunk_id );
++    }
++    write_members( jsout );
++    jsout.end_object();
++    progress_log << line.str() << '\n';
++    progress_log.flush();
++}
++
++static bool totals_failed( const Catch::Totals &totals )
++{
++    return totals.error != 0 || totals.assertions.failed != 0 || totals.testCases.failed != 0;
++}
++
+ struct CataListener : Catch::TestEventListenerBase {
+     using TestEventListenerBase::TestEventListenerBase;
+ 
+@@ -217,19 +318,42 @@ struct CataListener : Catch::TestEventListenerBase {
+             start_time = std::chrono::system_clock::now();
+         }
+         end_time = start_time;
++        write_progress_event( "run_started", [this]( JsonOut & jsout ) {
++            jsout.member( "seed", m_config->rngSeed() );
++        } );
+     }
+ 
+-    void testRunEnded( Catch::TestRunStats const & ) override {
++    void testRunEnded( Catch::TestRunStats const &stats ) override {
+         end_time = std::chrono::system_clock::now();
++        write_progress_event( "run_finished", [&stats]( JsonOut & jsout ) {
++            jsout.member( "outcome", totals_failed( stats.totals ) ? "failed" : "passed" );
++            jsout.member( "test_cases_passed", stats.totals.testCases.passed );
++            jsout.member( "test_cases_failed", stats.totals.testCases.failed );
++            jsout.member( "test_cases_failed_but_ok", stats.totals.testCases.failedButOk );
++            jsout.member( "assertions_passed", stats.totals.assertions.passed );
++            jsout.member( "assertions_failed", stats.totals.assertions.failed );
++            jsout.member( "assertions_failed_but_ok", stats.totals.assertions.failedButOk );
++            jsout.member( "aborting", stats.aborting );
++        } );
+     }
+ 
+     void testCaseStarting( Catch::TestCaseInfo const &testInfo ) override {
++        test_case_start_time = std::chrono::steady_clock::now();
++        write_progress_event( "test_started", [&testInfo]( JsonOut & jsout ) {
++            jsout.member( "name", testInfo.name );
++            jsout.member( "source_file", testInfo.lineInfo.file );
++            jsout.member( "source_line", testInfo.lineInfo.line );
++            jsout.member( "hidden", testInfo.isHidden() );
++            jsout.member( "tags", testInfo.tags );
++        } );
+         if( !game_initialized && !fail_to_init_game_state ) {
+             bool is_nogame = std::find( testInfo.tags.begin(), testInfo.tags.end(),
+                                         "nogame" ) != testInfo.tags.end();
+             if( !is_nogame ) {
+                 try {
++                    write_progress_event( "initialization_started", []( JsonOut & ) {} );
+                     init_global_game_state( mods, option_overrides_for_test_suite, user_dir );
++                    write_progress_event( "initialization_finished", []( JsonOut & ) {} );
+                 } catch( ... ) {
+                     DebugLog( D_INFO, DC_ALL ) << "Fail to initialize global game state"
+                                                << std::endl;
+@@ -282,6 +406,18 @@ struct CataListener : Catch::TestEventListenerBase {
+ 
+     void testCaseEnded( Catch::TestCaseStats const &testCaseStats ) override {
+         TestEventListenerBase::testCaseEnded( testCaseStats );
++        const double duration_seconds = std::chrono::duration<double>(
++                    std::chrono::steady_clock::now() - test_case_start_time ).count();
++        write_progress_event( "test_finished", [&testCaseStats, duration_seconds]( JsonOut & jsout ) {
++            jsout.member( "name", testCaseStats.testInfo.name );
++            jsout.member( "outcome", totals_failed( testCaseStats.totals ) ? "failed" : "passed" );
++            jsout.member( "duration_seconds", duration_seconds );
++            jsout.member( "assertions_passed", testCaseStats.totals.assertions.passed );
++            jsout.member( "assertions_failed", testCaseStats.totals.assertions.failed );
++            jsout.member( "assertions_failed_but_ok",
++                          testCaseStats.totals.assertions.failedButOk );
++            jsout.member( "aborting", testCaseStats.aborting );
++        } );
+         if( !game_initialized ) {
+             return;
+         }
+@@ -323,6 +459,12 @@ TEST_CASE( "noop_test", "[.]" )
+     CHECK( true );
+ }
+ 
++// NOLINTNEXTLINE(cata-test-filename)
++TEST_CASE( "test_data_initialization", "[.][test_harness]" )
++{
++    CHECK( game_initialized );
++}
++
+ 
+ // NOLINTNEXTLINE(bugprone-exception-escape): test runner intentionally lets exceptions propagate
+ int main( int argc, const char *argv[] )
+@@ -369,6 +511,15 @@ int main( int argc, const char *argv[] )
+                  | Opt( user_dir, "dirname" )
+                  ["--user-dir"]
+                  ( "[CataclysmDDA] Set user dir (where test world will be created)" )
++                 | Opt( progress_log_path, "filename" )
++                 ["--test-progress-log"]
++                 ( "[CataclysmDDA] Append machine-readable test progress as JSONL." )
++                 | Opt( output_dir_path, "dirname" )
++                 ["--test-output-dir"]
++                 ( "[CataclysmDDA] Store test-generated files in this directory." )
++                 | Opt( test_plan_path, "filename" )
++                 ["--test-plan"]
++                 ( "[CataclysmDDA] Run ordered test chunks from a JSON plan in one process." )
+                  | Opt( dont_save )
+                  ["--drop-world"] // "-D" conflicts with Catch2 own "--min-duration"
+                  ( "[CataclysmDDA] Don't save the world on test failure." )
+@@ -410,6 +561,41 @@ int main( int argc, const char *argv[] )
+         user_dir += "/";
+     }
+ 
++    const Catch::ConfigData &config_data = session.configData();
++    const bool listing = config_data.listTests || config_data.listTags ||
++                         config_data.listReporters || config_data.listTestNamesOnly;
++    if( !listing ) {
++        if( output_dir_path.empty() ) {
++            output_dir_path = user_dir + "test-artifacts";
++        }
++        std::error_code output_dir_error;
++        const std::filesystem::path output_dir = std::filesystem::u8path( output_dir_path );
++        std::filesystem::create_directories( output_dir, output_dir_error );
++        if( output_dir_error || !std::filesystem::is_directory( output_dir ) ) {
++            std::cerr << "Unable to create test output directory: " << output_dir_path << '\n';
++            return EXIT_FAILURE;
++        }
++        set_test_output_dir( output_dir );
++
++        if( !progress_log_path.empty() ) {
++            const std::filesystem::path progress_path = std::filesystem::u8path( progress_log_path );
++            const std::filesystem::path parent = progress_path.parent_path();
++            std::error_code progress_dir_error;
++            if( !parent.empty() ) {
++                std::filesystem::create_directories( parent, progress_dir_error );
++            }
++            if( progress_dir_error ) {
++                std::cerr << "Unable to create test progress directory: " << parent.string() << '\n';
++                return EXIT_FAILURE;
++            }
++            progress_log.open( progress_path, std::ios::out | std::ios::trunc );
++            if( !progress_log.is_open() ) {
++                std::cerr << "Unable to open test progress log: " << progress_log_path << '\n';
++                return EXIT_FAILURE;
++            }
++        }
++    }
++
+     option_overrides_for_test_suite = extract_option_overrides( option_overrides );
+ 
+     if( error_fmt == "github-action" ) {
+@@ -465,7 +651,43 @@ int main( int argc, const char *argv[] )
+     }
+ 
+     try {
+-        if( rng_seed_fuzz_iterations > 1 ) {
++        if( !test_plan_path.empty() ) {
++            if( rng_seed_fuzz_iterations > 1 ) {
++                throw std::runtime_error( "--test-plan and --rng-seed-fuzz cannot be combined" );
++            }
++            const std::vector<test_plan_chunk> plan = load_test_plan( test_plan_path );
++            const Catch::ConfigData base_config = session.configData();
++            result = 0;
++            for( const test_plan_chunk &chunk : plan ) {
++                current_chunk_id = chunk.id;
++                const std::filesystem::path chunk_output = std::filesystem::u8path( chunk.output_dir );
++                std::error_code chunk_output_error;
++                std::filesystem::create_directories( chunk_output, chunk_output_error );
++                if( chunk_output_error || !std::filesystem::is_directory( chunk_output ) ) {
++                    throw std::runtime_error( "Unable to create chunk output directory: " +
++                                              chunk.output_dir );
++                }
++                set_test_output_dir( chunk_output );
++
++                Catch::ConfigData chunk_config = base_config;
++                chunk_config.testsOrTags = { make_test_filter( chunk.tests ) };
++                chunk_config.rngSeed = chunk.seed;
++                chunk_config.runOrder = Catch::RunTests::InDeclarationOrder;
++                session.useConfigData( chunk_config );
++                rng_set_engine_seed( chunk.seed );
++                debug_reset_error_observed();
++                const int chunk_result = session.run();
++                const bool chunk_failed = chunk_result != 0 || debug_has_error_been_observed();
++                write_progress_event( "chunk_completed", [chunk_failed, chunk_result]( JsonOut & jsout ) {
++                    jsout.member( "outcome", chunk_failed ? "failed" : "passed" );
++                    jsout.member( "catch_exit_code", chunk_result );
++                } );
++                if( chunk_failed ) {
++                    result = 1;
++                }
++            }
++            current_chunk_id.clear();
++        } else if( rng_seed_fuzz_iterations > 1 ) {
+             // NOLINTNEXTLINE(cata-determinism)
+             std::minstd_rand0 fuzz_rng(
+                 std::chrono::high_resolution_clock::now().time_since_epoch().count() );
+diff --git a/tests/test_output.cpp b/tests/test_output.cpp
+new file mode 100644
+index 00000000000..9c759fcbf25
+--- /dev/null
++++ b/tests/test_output.cpp
+@@ -0,0 +1,30 @@
++#include "test_output.h"
++
++#include <stdexcept>
++
++namespace
++{
++std::filesystem::path output_dir;
++} // namespace
++
++void set_test_output_dir( const std::filesystem::path &path )
++{
++    output_dir = path;
++}
++
++const std::filesystem::path &test_output_dir()
++{
++    if( output_dir.empty() ) {
++        throw std::logic_error( "test output directory has not been initialized" );
++    }
++    return output_dir;
++}
++
++std::filesystem::path test_output_path( const std::string_view filename )
++{
++    const std::filesystem::path relative = std::filesystem::u8path( filename );
++    if( relative.empty() || relative.is_absolute() || relative.has_parent_path() ) {
++        throw std::invalid_argument( "test output filename must be a single relative path component" );
++    }
++    return test_output_dir() / relative;
++}
+diff --git a/tests/test_output.h b/tests/test_output.h
+new file mode 100644
+index 00000000000..f4687f50f59
+--- /dev/null
++++ b/tests/test_output.h
+@@ -0,0 +1,8 @@
++#pragma once
++
++#include <filesystem>
++#include <string_view>
++
++void set_test_output_dir( const std::filesystem::path &path );
++const std::filesystem::path &test_output_dir();
++std::filesystem::path test_output_path( std::string_view filename );
+diff --git a/tests/test_output_test.cpp b/tests/test_output_test.cpp
+new file mode 100644
+index 00000000000..f4d3067a4e9
+--- /dev/null
++++ b/tests/test_output_test.cpp
+@@ -0,0 +1,47 @@
++#include <cstdlib>
++#include <fstream>
++#include <string>
++
++#include "cata_catch.h"
++#include "test_output.h"
++
++TEST_CASE( "test_output_directory", "[.][nogame][test_harness]" )
++{
++    const std::filesystem::path path = test_output_path( "test-output-smoke.txt" );
++    {
++        std::ofstream output( path, std::ios::out | std::ios::trunc );
++        REQUIRE( output.is_open() );
++        output << "test harness output\n";
++    }
++
++    std::ifstream input( path );
++    REQUIRE( input.is_open() );
++    std::string line;
++    std::getline( input, line );
++    CHECK( line == "test harness output" );
++    CHECK_THROWS( test_output_path( "../outside.txt" ) );
++}
++
++TEST_CASE( "test_harness_crash_once", "[.][nogame][test_harness]" )
++{
++    std::string attempt;
++    for( std::filesystem::path path = test_output_dir(); !path.empty(); path = path.parent_path() ) {
++        const std::string component = path.filename().string();
++        if( component.rfind( "attempt-", 0 ) == 0 ) {
++            attempt = component;
++            break;
++        }
++        if( path == path.parent_path() ) {
++            break;
++        }
++    }
++    if( attempt == "attempt-0001" ) {
++        std::_Exit( 99 );
++    }
++    CHECK( attempt == "attempt-0002" );
++}
++
++TEST_CASE( "test_harness_expected_failure", "[.][nogame][test_harness]" )
++{
++    CHECK( false );
++}
+diff --git a/tests/water_movement_test.cpp b/tests/water_movement_test.cpp
+index b60092ba744..baed9114ceb 100644
+--- a/tests/water_movement_test.cpp
++++ b/tests/water_movement_test.cpp
+@@ -24,6 +24,7 @@
+ #include "profession.h"
+ #include "skill.h"
+ #include "string_formatter.h"
++#include "test_output.h"
+ #include "type_id.h"
+ 
+ static const efftype_id effect_winded( "winded" );
+@@ -969,7 +970,7 @@ TEST_CASE( "export_scenario_swim_move_cost_and_distance_values", "[.]" )
+     avatar &dummy = get_avatar();
+ 
+     std::ofstream testfile;
+-    testfile.open( std::filesystem::u8path( "swim-scenarios.csv" ), std::ofstream::trunc );
++    testfile.open( test_output_path( "swim-scenarios.csv" ), std::ofstream::trunc );
+     testfile << "scenario, move cost, steps" << std::endl;
+ 
+     for( const swim_scenario &scenario : generate_scenarios() ) {
+@@ -994,7 +995,7 @@ TEST_CASE( "export_profession_swim_cost_and_distance", "[.]" )
+     avatar &dummy = get_avatar();
+ 
+     std::ofstream testfile;
+-    testfile.open( std::filesystem::u8path( "swim-profession.csv" ), std::ofstream::trunc );
++    testfile.open( test_output_path( "swim-profession.csv" ), std::ofstream::trunc );
+     testfile << "profession, move cost, steps" << std::endl;
+ 
+     const std::vector<profession> &all = profession::get_all();
+@@ -1030,7 +1031,7 @@ TEST_CASE( "export_swim_move_cost_and_distance_data", "[.]" )
+     avatar &dummy = get_avatar();
+ 
+     std::ofstream testfile;
+-    testfile.open( std::filesystem::u8path( "swim-skill.csv" ), std::ofstream::trunc );
++    testfile.open( test_output_path( "swim-skill.csv" ), std::ofstream::trunc );
+     testfile << "athletics, move cost, steps" << std::endl;
+     for( int i = 0; i <= 10; i++ ) {
+         swimmer_config config( stats_map.at( "average" ), swimmer_skills{i}, gear_map.at( "none" ),
+@@ -1040,7 +1041,7 @@ TEST_CASE( "export_swim_move_cost_and_distance_data", "[.]" )
+     }
+     testfile.close();
+ 
+-    testfile.open( std::filesystem::u8path( "swim-strength.csv" ), std::ofstream::trunc );
++    testfile.open( test_output_path( "swim-strength.csv" ), std::ofstream::trunc );
+     testfile << "strength, move cost, steps" << std::endl;
+     for( int i = 4; i <= 20; i++ ) {
+         swimmer_config config( {i, 8}, skills_map.at( "none" ), gear_map.at( "none" ),
+@@ -1050,7 +1051,7 @@ TEST_CASE( "export_swim_move_cost_and_distance_data", "[.]" )
+     }
+     testfile.close();
+ 
+-    testfile.open( std::filesystem::u8path( "swim-dexterity.csv" ), std::ofstream::trunc );
++    testfile.open( test_output_path( "swim-dexterity.csv" ), std::ofstream::trunc );
+     testfile << "dexterity, move cost, steps" << std::endl;
+     for( int i = 4; i <= 20; i++ ) {
+         swimmer_config config( { 8, i }, skills_map.at( "none" ), gear_map.at( "none" ),
+diff --git a/tests/weakpoint_test.cpp b/tests/weakpoint_test.cpp
+index 474c305b482..68f09490a21 100644
+--- a/tests/weakpoint_test.cpp
++++ b/tests/weakpoint_test.cpp
+@@ -1,4 +1,5 @@
+ #include <cmath>
++#include <filesystem>
+ #include <fstream>
+ #include <iostream>
+ #include <list>
+@@ -19,6 +20,7 @@
+ #include "mtype.h"
+ #include "player_helpers.h"
+ #include "string_formatter.h"
++#include "test_output.h"
+ #include "type_id.h"
+ #include "weakpoint.h"
+ 
+@@ -365,8 +367,8 @@ TEST_CASE( "weakpoint_hit_distribution_projectile", "[.]" )
+     }
+ 
+     std::ofstream output;
+-    std::string filename = "weakpoint_hit_distribution.csv";
+-    output.open( filename );
++    const std::filesystem::path output_path = test_output_path( "weakpoint_hit_distribution.csv" );
++    output.open( output_path );
+     REQUIRE( output.is_open() );
+     output << "Monster,Weapon,Weapon skill level,Accuracy,Weakpoint id,Probability\n";
+ 
+@@ -382,5 +384,5 @@ TEST_CASE( "weakpoint_hit_distribution_projectile", "[.]" )
+         }
+     }
+ 
+-    std::cout << "Output written to " << filename << std::endl;
++    std::cout << "Output written to " << output_path.string() << std::endl;
+ }
+-- 
+2.50.0.windows.2
+

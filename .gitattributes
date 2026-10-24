@@ -11,3 +11,6 @@ Dockerfile.* text eol=lf
 
 # 확장자 없는 셸 스크립트(`*.sh`가 못 잡는 구멍). 스킬 미러의 task-brief가 실물이다.
 **/scripts/task-brief text eol=lf
+
+# `git format-patch` 산출물. 개행 변환이 바이트를 바꾸면 `git am`이 적용하지 못한다.
+patches/**/*.patch -text
